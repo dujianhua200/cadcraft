@@ -18,6 +18,8 @@ fn texts(shape: &Shape, out: &mut Vec<(String, Rect, bool)>) {
 #[test]
 fn long_names_are_cut_short_inside_the_tab() {
     let mut app = CadApp::new(Session::default(), Services::default());
+    // This test asserts the English "Start" tab label; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("new", serde_json::json!({})).unwrap();
     app.run("circle", serde_json::json!({"center": [0, 0], "radius": 1})).unwrap();
     app.session.state_mut().unwrap().title = "LICENCIA COFRE DE PEROTE REPOSICION FINAL.dwg".into();

@@ -6,6 +6,7 @@
 //! waits. Each drawing has its own symbols, as in AutoCAD. A run is one undo step.
 
 pub mod builtins;
+pub mod dcl;
 mod drawing;
 pub mod eval;
 pub mod input;
@@ -61,6 +62,11 @@ pub struct Env {
     /// The command history's length after LISP last printed a line: when something else wrote since
     /// (a prompt, a command's echo), a leading newline only ends that line.
     pub printed_at: Option<usize>,
+    /// DCL files `load_dialog` read, by id.
+    pub dcl_files: HashMap<u32, dcl::DclFile>,
+    pub dcl_next: u32,
+    /// The dialog `new_dialog` opened, if any.
+    pub dcl_active: Option<dcl::ActiveDialog>,
 }
 
 impl Default for Env {
@@ -76,6 +82,9 @@ impl Default for Env {
             order: None,
             tblnext: HashMap::new(),
             printed_at: None,
+            dcl_files: HashMap::new(),
+            dcl_next: 1,
+            dcl_active: None,
         };
         builtins::install(&mut e);
         e
@@ -197,6 +206,12 @@ impl Session {
     /// A routine is stopped, waiting for input or for a frame.
     pub(crate) fn lisp_waiting(&self) -> bool {
         self.lisp.run.is_some()
+    }
+
+    /// A routine is stopped, waiting for its dialog to close (see `Need::Dialog`):
+    /// Esc dismisses the dialog instead of aborting the routine.
+    pub(crate) fn lisp_waiting_on_dialog(&self) -> bool {
+        self.lisp.run.as_ref().is_some_and(|r| matches!(r.waiting, Some(Need::Dialog)))
     }
 
     /// The value of a LISP variable in the active drawing (nil when unbound).
@@ -371,8 +386,24 @@ impl Session {
                     self.lisp.run = Some(run);
                     return;
                 }
+                Outcome::Wait(Need::Dialog) => {
+                    if run.blocking {
+                        // No window can open in a blocking evaluation: the dialog is
+                        // dismissed (or keeps a status a press already recorded).
+                        let done = self.lisp_take_dialog_done();
+                        run.machine.resume(Value::Int(done));
+                        self.lisp.run = Some(run);
+                        continue;
+                    }
+                    run.waiting = Some(Need::Dialog);
+                    self.lisp.run = Some(run);
+                    return;
+                }
                 Outcome::Wait(Need::Get(req)) => {
                     if let Some(v) = run.inputs.pop_front() {
+                        // An `entsel` answer that is a point picks the entity there, as a
+                        // click would: the routine gets `(ename point)`, not the bare point.
+                        let v = if req.kind == input::GetKind::EntSel { input::pick_answer(self, v) } else { v };
                         run.machine.resume(v);
                         self.lisp.run = Some(run);
                         continue;
@@ -517,6 +548,17 @@ impl Session {
 
     /// Give an input to a waiting routine. `true` when the routine took it.
     pub(crate) fn lisp_input(&mut self, input: Input) -> bool {
+        // A dialog owns the input while a routine waits on it: Esc dismisses it (the
+        // routine carries on with status 0), anything else is swallowed so typing at
+        // the command line cannot run behind the modal dialog. The dialog's own
+        // buttons and tiles drive it through `lisp_dialog_*`, not through input.
+        if self.lisp.run.as_ref().is_some_and(|r| matches!(r.waiting, Some(Need::Dialog))) {
+            if input == Input::Cancel {
+                self.echo("*Cancel*");
+                self.lisp_dialog_finish(0);
+            }
+            return true;
+        }
         let Some(req) = self.lisp.run.as_ref().and_then(|r| match &r.waiting {
             Some(Need::Get(req)) => Some(req.clone()),
             _ => None,

@@ -967,10 +967,85 @@ pub struct RawTag {
     pub code: i32,
     pub value: String,
 }
+
+/// The kind of cached picture an OLE object's embedded data carries, when one could be
+/// classified at read time. The picture bytes themselves are not kept: the renderer
+/// re-derives the EMF bytes from the entity's 310 groups when it draws the frame and
+/// renders the EMF as vector geometry; a raster/WMF preview (or an EMF that yields no
+/// geometry) stays a placeholder rectangle + label, and an IMAGE entity likewise draws
+/// only its frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OlePreviewKind {
+    /// A complete raster file (BMP/PNG/JPEG/GIF).
+    Raster,
+    /// A headerless DIB (BITMAPINFO + bits), as CF_DIB stores it.
+    Dib,
+    /// An enhanced metafile (EMF) record stream.
+    Emf,
+    /// A Windows metafile (WMF).
+    Wmf,
+}
+
+/// An OLE2FRAME's frame, parsed once at read time from its DXF groups: group 10/20/30 is
+/// the upper-left corner, 11/21/31 the lower-right corner (DXF Reference, OLE2FRAME), group
+/// 3 the source application, group 71 the object type (1 link, 2 embedded, 3 static). The
+/// frame is axis-aligned: OLE2FRAME has no rotation groups. The raw 310 binary groups stay
+/// in [`Unknown::tags`] for round-tripping; this is only the parsed geometry + preview kind.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OleFrame {
+    pub upper_left: Vec3,
+    pub lower_right: Vec3,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_app: String,
+    /// DXF group 71: 1 link, 2 embedded, 3 static.
+    #[serde(default = "ole_embedded")]
+    pub object_type: i16,
+    /// The cached preview inside the embedded data, when one could be classified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<OlePreviewKind>,
+}
+
+fn ole_embedded() -> i16 {
+    2
+}
+
+impl OleFrame {
+    /// The frame's four corners in WCS, from the min/max of the two DXF corners (their order
+    /// in a file is not trusted): upper-left, upper-right, lower-right, lower-left.
+    pub fn corners(&self) -> [Vec2; 4] {
+        let (x0, x1) = (self.upper_left.x.min(self.lower_right.x), self.upper_left.x.max(self.lower_right.x));
+        let (y0, y1) = (self.upper_left.y.min(self.lower_right.y), self.upper_left.y.max(self.lower_right.y));
+        [Vec2::new(x0, y1), Vec2::new(x1, y1), Vec2::new(x1, y0), Vec2::new(x0, y0)]
+    }
+
+    /// True when the frame has finite, non-zero area: the only frames that draw.
+    pub fn is_visible(&self) -> bool {
+        let (x0, x1) = (self.upper_left.x.min(self.lower_right.x), self.upper_left.x.max(self.lower_right.x));
+        let (y0, y1) = (self.upper_left.y.min(self.lower_right.y), self.upper_left.y.max(self.lower_right.y));
+        x0.is_finite() && x1.is_finite() && y0.is_finite() && y1.is_finite() && x1 > x0 && y1 > y0 && x1 - x0 < 1e15 && y1 - y0 < 1e15
+    }
+
+    /// The label the renderer draws inside the frame.
+    pub fn label(&self) -> String {
+        if self.preview.is_some() {
+            let app = self.source_app.trim();
+            if app.is_empty() { "OLE 嵌入对象".to_string() } else { format!("OLE 嵌入对象 · {app}") }
+        } else {
+            "OLE 嵌入对象（预览不可用）".to_string()
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Unknown {
     pub dxf_type: String,
     pub tags: Vec<RawTag>,
+    /// Parsed OLE2FRAME frame, when this is one; `None` for every other unmodelled type and
+    /// for OLE2FRAME records whose frame groups are missing or degenerate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ole: Option<OleFrame>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1171,7 +1246,16 @@ impl EntityKind {
             EntityKind::Image(i) => vec![Prim::Point(i.insert.xy())],
             EntityKind::Table(t) => vec![Prim::Point(t.insert.xy())],
             EntityKind::Tolerance(t) => vec![Prim::Point(t.insert.xy())],
-            EntityKind::Unknown(_) => Vec::new(),
+            // An OLE2FRAME draws as its frame rectangle plus both diagonals, so it is
+            // selectable and has extents; every other unmodelled type draws nothing.
+            EntityKind::Unknown(u) => match u.ole.as_ref().filter(|o| o.is_visible()) {
+                Some(o) => {
+                    let c = o.corners();
+                    let seg = |a: Vec2, b: Vec2| Prim::Seg(Segment::Line(GLine::new(a, b)));
+                    vec![seg(c[0], c[1]), seg(c[1], c[2]), seg(c[2], c[3]), seg(c[3], c[0]), seg(c[0], c[2]), seg(c[1], c[3])]
+                }
+                None => Vec::new(),
+            },
         }
     }
 
@@ -1378,7 +1462,41 @@ impl EntityKind {
                 let a = if mirror { t.rotation() } else { t.rotation() + rot };
                 t.dir = Vec2::from_angle(cadcraft_geom::norm_angle(a)).to3(0.0);
             }
-            EntityKind::Unknown(_) => {}
+            // An OLE frame moves with the drawing. OLE2FRAME stores only two opposite
+            // corners, so a rotated frame becomes the bounding box of its rotated corners
+            // (a DXF OLE2FRAME cannot express a rotated rectangle); translation, uniform
+            // scale and mirroring are exact. The raw tags are rewritten to match, so a
+            // DXF round trip (which writes the tags verbatim) keeps the new frame.
+            EntityKind::Unknown(u) => {
+                if let Some(o) = &mut u.ole {
+                    let moved: Vec<Vec2> = o.corners().iter().map(|c| m.apply(*c)).collect();
+                    let (mut x0, mut x1) = (f64::INFINITY, f64::NEG_INFINITY);
+                    let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
+                    for c in &moved {
+                        x0 = x0.min(c.x);
+                        x1 = x1.max(c.x);
+                        y0 = y0.min(c.y);
+                        y1 = y1.max(c.y);
+                    }
+                    if x0.is_finite() && x1.is_finite() && y0.is_finite() && y1.is_finite() {
+                        let z0 = o.upper_left.z;
+                        let z1 = o.lower_right.z;
+                        o.upper_left = Vec3::new(x0, y1, z0);
+                        o.lower_right = Vec3::new(x1, y0, z1);
+                        let mut set = |code: i32, v: f64| {
+                            if let Some(t) = u.tags.iter_mut().find(|t| t.code == code) {
+                                t.value = v.to_string();
+                            }
+                        };
+                        set(10, x0);
+                        set(20, y1);
+                        set(30, z0);
+                        set(11, x1);
+                        set(21, y0);
+                        set(31, z1);
+                    }
+                }
+            }
         }
     }
 

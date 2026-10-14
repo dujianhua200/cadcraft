@@ -203,6 +203,7 @@ fn a_selected_reference_opens_its_block_and_bclose_asks_to_save() {
 fn a_file_save_writes_the_drawing_outside_the_editor() {
     // The writer records how many objects the drawing's model space has, and block Door's.
     set_io(IoHooks {
+        read_progress: None,
         read: |_, _| Err("no reader in this test".into()),
         write: |d, _| Ok(format!("{} {}", d.model.len(), d.block("Door").map_or(0, |b| b.entities.len())).into_bytes()),
         plot: None,

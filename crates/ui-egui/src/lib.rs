@@ -19,6 +19,7 @@ pub mod cmdline;
 pub mod context_menu;
 pub mod control;
 pub mod credits;
+pub mod dcl_dialog;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
@@ -44,6 +45,7 @@ pub mod plotstyles;
 pub mod quick;
 pub mod shortcut_menus;
 pub mod theme;
+pub mod tiles;
 pub mod viewcube;
 pub mod vpscale;
 
@@ -799,7 +801,7 @@ mod tests {
         frame(&mut a, &ctx, None);
         assert_eq!(Tokens::get(), Tokens::of(theme::SYSTEM_FALLBACK), "no OS appearance: the documented fallback");
         assert_eq!(a.ui.theme, ThemePref::System);
-        assert_eq!(a.prefs_json(), r#"{"animations":"system","interfaceLanguage":"auto","saveFormat":"dxf","saveVersion":"2018","theme":"system"}"#);
+        assert_eq!(a.prefs_json(), r#"{"animations":"system","interfaceLanguage":"zh","saveFormat":"dxf","saveVersion":"2018","theme":"system"}"#);
     }
 
     #[test]

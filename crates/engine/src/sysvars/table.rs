@@ -41,6 +41,11 @@ enum Def {
 /// Header variables: name, kind, the default the commands use while the header has none.
 const HEADER: &[(&str, Kind, Def)] = &[
     ("CENTEREXE", Kind::Real { min: 0.0, strict: false }, Def::Units(0.12, 3.5)),
+    // Routines read and write these (the engine keeps them in the header, default on).
+    ("CMDECHO", Kind::Choice(&[0, 1]), Def::Int(1)),
+    ("ATTDIA", Kind::Choice(&[0, 1]), Def::Int(1)),
+    ("ATTREQ", Kind::Choice(&[0, 1]), Def::Int(1)),
+    ("FILLMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("CHAMFERA", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
     ("CHAMFERB", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
     ("CHAMFERC", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),

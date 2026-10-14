@@ -4,11 +4,14 @@
 //! `angtof`).
 //!
 //! Entity lists use the DXF groups the file reader and writer use (through
-//! [`crate::cmd::file::entity_codec`]), so what `entget` shows is what a DXF file holds.
+//! [`crate::cmd::file::entity_codec`]), except angles: the codec stores most angles as
+//! degrees in DXF files, while AutoLISP reports and takes them as radians (the DXF
+//! Reference). `entget` converts degrees to radians, `entmake`/`entmod` convert back,
+//! so a routine that reads an angle and writes it back round-trips exactly.
 
 use std::sync::{Arc, Mutex};
 
-use cadcraft_doc::{Entity, Handle, Space};
+use cadcraft_doc::{Entity, EntityKind, Handle, Space};
 use cadcraft_dxf::Tag;
 use cadcraft_geom::Vec2;
 
@@ -265,6 +268,56 @@ fn codec() -> Result<&'static crate::cmd::file::EntityCodec, LispError> {
     crate::cmd::file::entity_codec().ok_or_else(|| LispError::new("entity lists are not available in this build"))
 }
 
+/// Group codes the codec stores as degrees but AutoLISP reports as radians (the DXF
+/// Reference: angles are radians). ELLIPSE's 41/42 parameters are already radians in
+/// the codec, so they are not listed. HATCH's 52 is the pattern angle (only written
+/// for non-solid hatches). Unmodelled types (e.g. SHAPE) need no arm: the writer
+/// emits no groups for them, so `entget` never sees their angles at all.
+fn angle_groups(kind: &str) -> &'static [i32] {
+    match kind {
+        "POINT" => &[50],
+        "TEXT" | "ATTRIB" | "ATTDEF" => &[50, 51],
+        "MTEXT" => &[50],
+        "ARC" => &[50, 51],
+        "INSERT" => &[50],
+        "DIMENSION" => &[50, 52, 53],
+        "HATCH" => &[52],
+        _ => &[],
+    }
+}
+
+/// An `entget` list with the codec's degree angles turned into the radians AutoLISP
+/// reports. A `0` group (an ATTRIB inlined in an INSERT) switches the entity type.
+fn entget_angles(kind: &str, items: Vec<Value>) -> Vec<Value> {
+    let mut cur = kind.to_ascii_uppercase();
+    items
+        .into_iter()
+        .map(|item| {
+            let (code, text) = match &item {
+                Value::Cons(c) => (c.car.as_number(), c.cdr.clone()),
+                _ => (None, Value::Nil),
+            };
+            if code == Some(0.0) {
+                if let Value::Str(s) = &text {
+                    cur = s.to_ascii_uppercase();
+                }
+                return item;
+            }
+            let Some(code) = code.map(|c| c as i32) else { return item };
+            if !angle_groups(&cur).contains(&code) {
+                return item;
+            }
+            match &item {
+                Value::Cons(c) => match &c.cdr {
+                    Value::Real(r) => Value::cons(c.car.clone(), Value::Real(r.to_radians())),
+                    _ => item,
+                },
+                _ => item,
+            }
+        })
+        .collect()
+}
+
 fn space_of(d: &cadcraft_doc::Drawing, h: Handle) -> Option<Space> {
     d.space_of(h)
 }
@@ -281,7 +334,7 @@ pub fn entget(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     };
     let mut items = vec![Value::cons(Value::Int(-1), Value::Ename(h)), Value::cons(Value::Int(0), Value::str(&kind))];
     let mut placed_layout = false;
-    for v in groups_to_list(&tags) {
+    for v in entget_angles(&kind, groups_to_list(&tags)) {
         // The layout name follows the AcDbEntity marker, as AutoCAD lists it.
         let after_marker = !placed_layout && v.car().as_number() == Some(100.0) && matches!(v.cdr(), Value::Str(ref s) if &**s == "AcDbEntity");
         items.push(v);
@@ -290,12 +343,26 @@ pub fn entget(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
             placed_layout = true;
         }
     }
+    // Rotation (50) is always present in AutoCAD's `entget`, even when 0: routines read it
+    // without checking. The writer omits a zero rotation, so it is added back here.
+    if matches!(kind.as_str(), "TEXT" | "MTEXT" | "INSERT" | "ATTDEF") && !items.iter().any(|v| v.car().as_number() == Some(50.0)) {
+        items.push(Value::cons(Value::Int(50), Value::Real(0.0)));
+    }
     Ok(Flow::Value(Value::list(items)))
 }
 
 /// The entity a list describes, as the reader makes it; a missing layer (8) is the current one.
 fn entity_from_list(ctx: &Ctx<'_>, list: &Value) -> Result<(String, cadcraft_doc::Common, cadcraft_doc::EntityKind), LispError> {
     let (kind, mut tags) = list_to_groups(list)?;
+    // AutoLISP angle groups are radians; the codec expects degrees.
+    for t in tags.iter_mut() {
+        if angle_groups(&kind).contains(&t.code) {
+            let v = t.value.as_f64();
+            if v.is_finite() {
+                t.value = cadcraft_dxf::Value::Real(v.to_degrees());
+            }
+        }
+    }
     if !tags.iter().any(|t| t.code == 8) {
         let layer = crate::sysvars::get(ctx.s, "CLAYER").and_then(|v| v.as_str().map(str::to_string)).unwrap_or_else(|| "0".into());
         tags.insert(0, Tag::s(8, layer));
@@ -307,24 +374,33 @@ fn entity_from_list(ctx: &Ctx<'_>, list: &Value) -> Result<(String, cadcraft_doc
     }
 }
 
-pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
-    arity(&a, 0, 1)?;
-    let Some(list) = a.first().filter(|v| !v.is_nil()) else { return Ok(Flow::Value(Value::Nil)) };
-    let (_, common, kind) = match entity_from_list(ctx, list) {
-        Ok(x) => x,
-        Err(_) => return Ok(Flow::Value(Value::Nil)),
-    };
+/// Make the entity a list describes: its handle, or `None` when the list can't be made.
+fn make_entity(ctx: &mut Ctx<'_>, list: &Value) -> Option<Handle> {
+    let (_, common, kind) = entity_from_list(ctx, list).ok()?;
     let space = ctx.s.space();
-    let Ok(d) = ctx.s.doc_mut() else { return Ok(Flow::Value(Value::Nil)) };
+    let Ok(d) = ctx.s.doc_mut() else { return None };
     // A layer entmake names that doesn't exist yet is created.
     d.ensure_layer(&common.layer);
     match d.add(&space, common, kind) {
-        Ok(_) => {
+        Ok(h) => {
             ctx.s.touch();
-            Ok(Flow::Value(list.clone()))
+            Some(h)
         }
-        Err(_) => Ok(Flow::Value(Value::Nil)),
+        Err(_) => None,
     }
+}
+
+pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 0, 1)?;
+    let Some(list) = a.first().filter(|v| !v.is_nil()) else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(if make_entity(ctx, list).is_some() { list.clone() } else { Value::Nil }))
+}
+
+/// `(entmakex list)`: like `entmake`, but returns the new entity's name instead of the list.
+pub fn entmakex(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 0, 1)?;
+    let Some(list) = a.first().filter(|v| !v.is_nil()) else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(make_entity(ctx, list).map(Value::Ename).unwrap_or_default()))
 }
 
 pub fn entmod(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
@@ -959,4 +1035,536 @@ pub fn load_source(s: &Session, name: &str) -> Option<String> {
     let support =
         s.lisp_support_dir().map(|d| candidates.iter().map(|c| d.join(c).to_string_lossy().into_owned()).collect::<Vec<_>>()).unwrap_or_default();
     candidates.iter().chain(&support).find_map(|c| super::builtins::read_text_file(c))
+}
+
+// ---------------- Visual LISP ActiveX (a minimal set) ----------------
+//
+// A VLA object is the entity's name: `vlax-ename->vla-object` returns the ename, so a VLA
+// object works everywhere an ename does (`entget`, `entmod`) and every `vlax-curve-…`
+// function takes either. A safearray is a list (what `vla-getboundingbox` writes into its
+// two output variables), so `vlax-safearray->list` passes a list through unchanged.
+//
+// Curve parameters are arc length from the curve's start, so `getparamatpoint` and
+// `getfirstderiv` agree with each other; the derivative is the unit tangent.
+
+fn vla_handle(v: &Value) -> Result<Handle, LispError> {
+    match v {
+        Value::Ename(h) => Ok(*h),
+        other => Err(LispError::bad_arg("lentityp", other)),
+    }
+}
+
+/// The entity list `entget` returns for `h`.
+fn entget_value(ctx: &mut Ctx<'_>, h: Handle) -> Option<Value> {
+    match entget(ctx, vec![Value::Ename(h)]) {
+        Ok(Flow::Value(v)) => Some(v),
+        _ => None,
+    }
+}
+
+fn assoc_value(list: &Value, code: i32) -> Option<Value> {
+    list.iter().find(|v| v.car().as_number() == Some(f64::from(code))).map(|v| v.cdr())
+}
+
+/// A property name as written (`TextString`, `TEXTSTRING`, `text-string`) in one form.
+fn prop_name(v: &Value) -> Result<String, LispError> {
+    let raw = match v {
+        Value::Str(s) => s.to_string(),
+        Value::Sym(s) => s.name().to_string(),
+        other => return Err(LispError::bad_arg("stringp", other)),
+    };
+    Ok(raw.chars().filter(|c| *c != '-' && *c != '_' && *c != ' ').collect::<String>().to_ascii_uppercase())
+}
+
+/// The DXF group a property reads and writes, when it is a plain group.
+fn prop_group(prop: &str) -> Option<i32> {
+    Some(match prop {
+        "TEXTSTRING" | "CONTENTS" => 1,
+        "STYLENAME" => 7,
+        "LAYER" => 8,
+        "LINETYPE" => 6,
+        "COLOR" => 62,
+        "LINETYPESCALE" => 48,
+        "HEIGHT" | "RADIUS" => 40,
+        "ROTATION" | "STARTANGLE" => 50,
+        "ENDANGLE" => 51,
+        "INSERTIONPOINT" | "CENTER" => 10,
+        "ALIGNMENTPOINT" => 11,
+        "CONSTANTWIDTH" => 43,
+        "ELEVATION" => 38,
+        "THICKNESS" => 39,
+        _ => return None,
+    })
+}
+
+fn is_computed(prop: &str) -> bool {
+    matches!(prop, "BOUNDINGBOX" | "LENGTH" | "AREA" | "STARTPOINT" | "ENDPOINT" | "OBJECTNAME" | "HANDLE" | "CLOSED")
+}
+
+/// The value of a computed property, or `None` when the entity has none.
+fn computed_property(ctx: &mut Ctx<'_>, h: Handle, prop: &str) -> Option<Value> {
+    let Ok(d) = ctx.s.doc() else { return None };
+    let e = d.entity(h)?;
+    match prop {
+        "OBJECTNAME" => Some(Value::str(e.kind.dxf_name())),
+        "HANDLE" => Some(Value::str(&h.hex())),
+        "BOUNDINGBOX" => {
+            let b = cadcraft_doc::entity_bounds(d, e, 0);
+            if b.is_empty() {
+                return None;
+            }
+            Some(Value::list(vec![Value::point(&[b.min.x, b.min.y, 0.0]), Value::point(&[b.max.x, b.max.y, 0.0])]))
+        }
+        "LENGTH" => curve_length(e).map(Value::Real),
+        "AREA" => curve_area(e).map(Value::Real),
+        "STARTPOINT" => curve_start(e).map(|p| Value::point(&p)),
+        "ENDPOINT" => curve_end(e).map(|p| Value::point(&p)),
+        "CLOSED" => {
+            let list = entget_value(ctx, h)?;
+            let flags = assoc_value(&list, 70)?.as_number().unwrap_or(0.0) as i64;
+            Some(Value::bool(flags & 1 != 0))
+        }
+        _ => None,
+    }
+}
+
+pub fn vla_get_property(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 2, 2)?;
+    let h = vla_handle(&a[0])?;
+    let prop = prop_name(&a[1])?;
+    if is_computed(&prop) {
+        return Ok(Flow::Value(computed_property(ctx, h, &prop).unwrap_or_default()));
+    }
+    let Some(code) = prop_group(&prop) else {
+        return Err(LispError::new(format!("bad property name: {}", a[1].as_sym().map_or_else(|| to_text(&a[1], false), |s| s.name().to_string()))));
+    };
+    let list = entget_value(ctx, h).unwrap_or_default();
+    Ok(Flow::Value(assoc_value(&list, code).unwrap_or_default()))
+}
+
+pub fn vla_put_property(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 3, 3)?;
+    let h = vla_handle(&a[0])?;
+    let prop = prop_name(&a[1])?;
+    if matches!(prop.as_str(), "BOUNDINGBOX" | "LENGTH" | "AREA" | "STARTPOINT" | "ENDPOINT" | "OBJECTNAME" | "HANDLE") {
+        return Err(LispError::new(format!("bad property: {prop} is read-only")));
+    }
+    let mut list = entget_value(ctx, h).unwrap_or_default();
+    if prop == "CLOSED" {
+        let flags = assoc_value(&list, 70).and_then(|v| v.as_number()).unwrap_or(0.0) as i64;
+        let flags = if a[2].is_nil() { flags & !1 } else { flags | 1 };
+        list = subst_group(&list, 70, Value::Int(i32::try_from(flags).unwrap_or(0)));
+    } else {
+        let Some(code) = prop_group(&prop) else { return Err(LispError::new(format!("bad property name: {}", to_text(&a[1], false)))) };
+        let v = check_group_value(code, &a[2])?;
+        list = subst_group(&list, code, v);
+    }
+    match entmod(ctx, vec![list]) {
+        Ok(Flow::Value(Value::Nil)) => Ok(Flow::Value(Value::Nil)),
+        Ok(_) => Ok(Flow::Value(a[2].clone())),
+        Err(e) => Err(e),
+    }
+}
+
+/// A value fit for DXF group `code`: strings for names and text, numbers for the rest, a
+/// point for point groups.
+fn check_group_value(code: i32, v: &Value) -> Result<Value, LispError> {
+    match code {
+        1 | 6 | 7 | 8 => match v {
+            Value::Str(_) => Ok(v.clone()),
+            other => Err(LispError::bad_arg("stringp", other)),
+        },
+        10 | 11 => match v.as_point() {
+            Some(p) => Ok(Value::point(&p)),
+            None => Err(LispError::bad_arg("2D/3D point", v)),
+        },
+        _ => match v.as_number() {
+            Some(n) => Ok(if matches!(v, Value::Int(_)) { Value::Int(n as i32) } else { Value::Real(n) }),
+            None => Err(LispError::bad_arg("numberp", v)),
+        },
+    }
+}
+
+/// `list` with group `code` set to `v` (replaced, or appended when absent).
+fn subst_group(list: &Value, code: i32, v: Value) -> Value {
+    let mut items = list.to_vec();
+    let mut found = false;
+    for item in &mut items {
+        if item.car().as_number() == Some(f64::from(code)) {
+            *item = Value::cons(Value::Int(code), v.clone());
+            found = true;
+        }
+    }
+    if !found {
+        items.push(Value::cons(Value::Int(code), v));
+    }
+    Value::list(items)
+}
+
+pub fn vla_get_textstring(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
+    let h = vla_handle(&a[0])?;
+    let list = entget_value(ctx, h).unwrap_or_default();
+    Ok(Flow::Value(assoc_value(&list, 1).unwrap_or_default()))
+}
+
+pub fn vla_put_textstring(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 2, 2)?;
+    let h = vla_handle(&a[0])?;
+    let s = match &a[1] {
+        Value::Str(s) => s.to_string(),
+        other => return Err(LispError::bad_arg("stringp", other)),
+    };
+    let mut list = entget_value(ctx, h).unwrap_or_default();
+    list = subst_group(&list, 1, Value::str(&s));
+    match entmod(ctx, vec![list]) {
+        Ok(Flow::Value(Value::Nil)) => Ok(Flow::Value(Value::Nil)),
+        Ok(_) => Ok(Flow::Value(Value::str(&s))),
+        Err(e) => Err(e),
+    }
+}
+
+/// `(vla-getboundingbox obj 'min 'max)`: writes the two corner points into the named
+/// variables (nil when the entity has no bounds).
+pub fn vla_getboundingbox(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 3, 3)?;
+    let h = vla_handle(&a[0])?;
+    let mut names = Vec::new();
+    for v in &a[1..] {
+        names.push(match v {
+            Value::Sym(s) => s.clone(),
+            Value::Str(s) => super::value::Sym::new(s),
+            other => return Err(LispError::bad_arg("symbolp", other)),
+        });
+    }
+    let Some(bounds) = computed_property(ctx, h, "BOUNDINGBOX") else { return Ok(Flow::Value(Value::Nil)) };
+    let mut it = bounds.iter();
+    let (Some(ll), Some(ur)) = (it.next(), it.next()) else { return Ok(Flow::Value(Value::Nil)) };
+    ctx.env.set(&names[0], ll);
+    ctx.env.set(&names[1], ur);
+    Ok(Flow::Value(Value::Nil))
+}
+
+pub fn vlax_ename_to_vla_object(_ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
+    Ok(Flow::Value(Value::Ename(vla_handle(&a[0])?)))
+}
+
+pub fn vlax_safearray_to_list(_ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
+    Ok(Flow::Value(match &a[0] {
+        Value::Cons(_) | Value::Nil => a[0].clone(),
+        other => Value::list(vec![other.clone()]),
+    }))
+}
+
+// ---------------- curves ----------------
+
+/// A curve as a polyline: points, the distance along it to each, whether it closes.
+struct Sample {
+    pts: Vec<[f64; 3]>,
+    cum: Vec<f64>,
+    closed: bool,
+    total: f64,
+}
+
+impl Sample {
+    fn segments(&self) -> usize {
+        if self.pts.len() < 2 {
+            0
+        } else if self.closed {
+            self.pts.len()
+        } else {
+            self.pts.len() - 1
+        }
+    }
+
+    fn seg(&self, i: usize) -> ([f64; 3], [f64; 3]) {
+        let a = self.pts[i];
+        let b = self.pts[if i + 1 < self.pts.len() { i + 1 } else { 0 }];
+        (a, b)
+    }
+
+    fn seg_start(&self, i: usize) -> f64 {
+        self.cum[i]
+    }
+
+    fn seg_len(&self, i: usize) -> f64 {
+        let (a, b) = self.seg(i);
+        dist(a, b)
+    }
+}
+
+fn dist(a: [f64; 3], b: [f64; 3]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+fn finish_sample(pts: Vec<[f64; 3]>, closed: bool) -> Option<Sample> {
+    if pts.len() < 2 {
+        return None;
+    }
+    let mut cum = vec![0.0];
+    let mut total = 0.0;
+    let n = if closed { pts.len() } else { pts.len() - 1 };
+    for i in 0..n {
+        let a = pts[i];
+        let b = pts[if i + 1 < pts.len() { i + 1 } else { 0 }];
+        total += dist(a, b);
+        if i + 1 < pts.len() {
+            cum.push(total);
+        }
+    }
+    if !total.is_finite() || total <= 0.0 {
+        return None;
+    }
+    Some(Sample { pts, cum, closed, total })
+}
+
+/// Points along an arc from `start`, sweeping `sweep` radians (either sign), `z` up.
+fn arc_points(center: [f64; 3], radius: f64, start: f64, sweep: f64, z: f64) -> Vec<[f64; 3]> {
+    let n = ((sweep.abs() / 0.05).ceil() as usize).clamp(4, 512);
+    (0..=n)
+        .map(|i| {
+            let t = start + sweep * i as f64 / n as f64;
+            [center[0] + radius * t.cos(), center[1] + radius * t.sin(), z]
+        })
+        .collect()
+}
+
+fn sample_curve(e: &Entity) -> Option<Sample> {
+    match &e.kind {
+        EntityKind::Line(l) => finish_sample(vec![[l.a.x, l.a.y, l.a.z], [l.b.x, l.b.y, l.b.z]], false),
+        EntityKind::LwPolyline(p) => {
+            let vs = &p.vertices;
+            if vs.len() < 2 {
+                return None;
+            }
+            let mut pts = vec![[vs[0].p.x, vs[0].p.y, p.elevation]];
+            let segs = if p.closed { vs.len() } else { vs.len() - 1 };
+            for i in 0..segs {
+                let a = vs[i].p;
+                let b = vs[(i + 1) % vs.len()].p;
+                if vs[i].bulge.abs() > 1e-12
+                    && let Some((arc, ccw)) = cadcraft_geom::bulge_to_arc(a, b, vs[i].bulge)
+                {
+                    let sweep = if ccw {
+                        (arc.end - arc.start).rem_euclid(std::f64::consts::TAU)
+                    } else {
+                        -((arc.start - arc.end).rem_euclid(std::f64::consts::TAU))
+                    };
+                    let mut arc_pts = arc_points([arc.center.x, arc.center.y, p.elevation], arc.radius, arc.start, sweep, p.elevation);
+                    arc_pts.remove(0);
+                    pts.extend(arc_pts);
+                    continue;
+                }
+                pts.push([b.x, b.y, p.elevation]);
+            }
+            if p.closed && pts.len() > 1 && pts.last().is_some_and(|q| *q == pts[0]) {
+                pts.pop();
+            }
+            finish_sample(pts, p.closed)
+        }
+        EntityKind::Arc(a) => {
+            let mut sweep = (a.end - a.start).rem_euclid(std::f64::consts::TAU);
+            if sweep == 0.0 {
+                sweep = std::f64::consts::TAU;
+            }
+            finish_sample(arc_points([a.center.x, a.center.y, a.center.z], a.radius, a.start, sweep, a.center.z), false)
+        }
+        EntityKind::Circle(c) => {
+            let pts = arc_points([c.center.x, c.center.y, c.center.z], c.radius, 0.0, std::f64::consts::TAU, c.center.z);
+            let mut pts = pts;
+            pts.pop();
+            finish_sample(pts, true)
+        }
+        EntityKind::Ellipse(el) => {
+            let major = el.major;
+            let len = (major.x * major.x + major.y * major.y).sqrt();
+            if len <= 0.0 || !el.ratio.is_finite() {
+                return None;
+            }
+            let minor = [(-major.y / len) * len * el.ratio, (major.x / len) * len * el.ratio, 0.0];
+            let mut sweep = (el.end - el.start).rem_euclid(std::f64::consts::TAU);
+            if sweep == 0.0 {
+                sweep = std::f64::consts::TAU;
+            }
+            let n = ((sweep.abs() / 0.05).ceil() as usize).clamp(8, 512);
+            let pts: Vec<[f64; 3]> = (0..=n)
+                .map(|i| {
+                    let t = el.start + sweep * i as f64 / n as f64;
+                    [
+                        el.center.x + major.x * t.cos() + minor[0] * t.sin(),
+                        el.center.y + major.y * t.cos() + minor[1] * t.sin(),
+                        el.center.z + major.z * t.cos(),
+                    ]
+                })
+                .collect();
+            finish_sample(pts, sweep >= std::f64::consts::TAU - 1e-9)
+        }
+        EntityKind::Spline(s) => {
+            let pts: Vec<[f64; 3]> = s.tessellate(1e-3).into_iter().map(|p| [p.x, p.y, 0.0]).collect();
+            finish_sample(pts, false)
+        }
+        EntityKind::Polyline3d(p) => {
+            let pts: Vec<[f64; 3]> = p.points.iter().map(|v| [v.x, v.y, v.z]).collect();
+            finish_sample(pts, p.closed)
+        }
+        EntityKind::Helix(h) => {
+            let pts: Vec<[f64; 3]> = h.spline().tessellate(1e-3).into_iter().map(|p| [p.x, p.y, 0.0]).collect();
+            finish_sample(pts, false)
+        }
+        _ => None,
+    }
+}
+
+/// The curve's length, or `None` when it isn't a curve.
+fn curve_length(e: &Entity) -> Option<f64> {
+    match &e.kind {
+        EntityKind::Line(l) => Some(dist([l.a.x, l.a.y, l.a.z], [l.b.x, l.b.y, l.b.z])),
+        EntityKind::Circle(c) => Some(std::f64::consts::TAU * c.radius),
+        EntityKind::Arc(a) => {
+            let mut sweep = (a.end - a.start).rem_euclid(std::f64::consts::TAU);
+            if sweep == 0.0 {
+                sweep = std::f64::consts::TAU;
+            }
+            Some(a.radius * sweep)
+        }
+        _ => sample_curve(e).map(|s| s.total),
+    }
+}
+
+/// The area a closed curve holds, or `None`.
+fn curve_area(e: &Entity) -> Option<f64> {
+    match &e.kind {
+        EntityKind::Circle(c) => Some(std::f64::consts::PI * c.radius * c.radius),
+        EntityKind::LwPolyline(p) if p.closed => {
+            let mut a = 0.0;
+            for i in 0..p.vertices.len() {
+                let q = p.vertices[(i + 1) % p.vertices.len()].p;
+                a += p.vertices[i].p.x * q.y - q.x * p.vertices[i].p.y;
+            }
+            Some(a.abs() / 2.0)
+        }
+        _ => None,
+    }
+}
+
+fn curve_start(e: &Entity) -> Option<[f64; 3]> {
+    match &e.kind {
+        EntityKind::Ray(r) | EntityKind::XLine(r) => Some([r.base.x, r.base.y, r.base.z]),
+        _ => sample_curve(e).and_then(|s| s.pts.first().copied()),
+    }
+}
+
+fn curve_end(e: &Entity) -> Option<[f64; 3]> {
+    match &e.kind {
+        EntityKind::Ray(_) | EntityKind::XLine(_) => None,
+        _ => sample_curve(e).map(|s| if s.closed { s.pts[0] } else { s.pts[s.pts.len() - 1] }),
+    }
+}
+
+fn curve_entity(ctx: &mut Ctx<'_>, v: &Value) -> Result<Option<Entity>, LispError> {
+    let h = vla_handle(v)?;
+    let Ok(d) = ctx.s.doc() else { return Ok(None) };
+    Ok(d.entity(h).map(|e| e.as_ref().clone()))
+}
+
+fn closest_on(s: &Sample, p: [f64; 3]) -> ([f64; 3], f64) {
+    let mut best = (s.pts[0], 0.0, f64::INFINITY);
+    for i in 0..s.segments() {
+        let (a, b) = s.seg(i);
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+        let t = if len2 <= 0.0 { 0.0 } else { (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1] + (p[2] - a[2]) * ab[2]) / len2).clamp(0.0, 1.0) };
+        let q = [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t];
+        let d = dist(p, q);
+        if d < best.2 {
+            best = (q, s.seg_start(i) + t * s.seg_len(i), d);
+        }
+    }
+    (best.0, best.1)
+}
+
+fn tangent_at(s: &Sample, param: f64) -> [f64; 3] {
+    let t = param.clamp(0.0, s.total);
+    for i in 0..s.segments() {
+        if t <= s.seg_start(i) + s.seg_len(i) || i + 1 == s.segments() {
+            let (a, b) = s.seg(i);
+            let len = dist(a, b);
+            if len <= 0.0 {
+                return [0.0, 0.0, 0.0];
+            }
+            return [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len];
+        }
+    }
+    [0.0, 0.0, 0.0]
+}
+
+pub fn vlax_curve_getclosestpointto(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 2, 2)?;
+    let p = a[1].as_point().ok_or_else(|| LispError::bad_arg("2D/3D point", &a[1]))?;
+    let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
+    if let EntityKind::Ray(r) | EntityKind::XLine(r) = &e.kind {
+        let d = [r.dir.x, r.dir.y, r.dir.z];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if len <= 0.0 {
+            return Ok(Flow::Value(Value::Nil));
+        }
+        let n = [d[0] / len, d[1] / len, d[2] / len];
+        let mut t = (p[0] - r.base.x) * n[0] + (p[1] - r.base.y) * n[1] + (p[2] - r.base.z) * n[2];
+        if matches!(e.kind, EntityKind::Ray(_)) {
+            t = t.max(0.0);
+        }
+        return Ok(Flow::Value(Value::point(&[r.base.x + n[0] * t, r.base.y + n[1] * t, r.base.z + n[2] * t])));
+    }
+    let Some(s) = sample_curve(&e) else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(Value::point(&closest_on(&s, p).0)))
+}
+
+pub fn vlax_curve_getparamatpoint(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 2, 2)?;
+    let p = a[1].as_point().ok_or_else(|| LispError::bad_arg("2D/3D point", &a[1]))?;
+    let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
+    if let EntityKind::Ray(r) | EntityKind::XLine(r) = &e.kind {
+        let d = [r.dir.x, r.dir.y, r.dir.z];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if len <= 0.0 {
+            return Ok(Flow::Value(Value::Nil));
+        }
+        let mut t = ((p[0] - r.base.x) * d[0] + (p[1] - r.base.y) * d[1] + (p[2] - r.base.z) * d[2]) / len;
+        if matches!(e.kind, EntityKind::Ray(_)) {
+            t = t.max(0.0);
+        }
+        return Ok(Flow::Value(Value::Real(t)));
+    }
+    let Some(s) = sample_curve(&e) else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(Value::Real(closest_on(&s, p).1)))
+}
+
+pub fn vlax_curve_getfirstderiv(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 2, 2)?;
+    let param = a[1].as_number().ok_or_else(|| LispError::bad_arg("numberp", &a[1]))?;
+    let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
+    if let EntityKind::Ray(r) | EntityKind::XLine(r) = &e.kind {
+        let d = [r.dir.x, r.dir.y, r.dir.z];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if len <= 0.0 {
+            return Ok(Flow::Value(Value::Nil));
+        }
+        return Ok(Flow::Value(Value::point(&[d[0] / len, d[1] / len, d[2] / len])));
+    }
+    let Some(s) = sample_curve(&e) else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(Value::point(&tangent_at(&s, param))))
+}
+
+pub fn vlax_curve_getstartpoint(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
+    let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(curve_start(&e).map(|p| Value::point(&p)).unwrap_or_default()))
+}
+
+pub fn vlax_curve_getendpoint(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
+    arity(&a, 1, 1)?;
+    let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
+    Ok(Flow::Value(curve_end(&e).map(|p| Value::point(&p)).unwrap_or_default()))
 }

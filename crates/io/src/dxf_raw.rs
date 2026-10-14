@@ -34,6 +34,9 @@ const MODELLED_KEYS: &[&str] = &[
     "ACAD_TABLESTYLE",
     "ACAD_IMAGE_DICT",
     "ACAD_IMAGE_VARS",
+    // OviMap link (§4.3): the writer rebuilds the OVIMAP_GEOREF dictionary from the
+    // drawing's georef + track vertex ids; a kept raw copy would write it twice.
+    "OVIMAP_GEOREF",
 ];
 
 /// Extension dictionary entries not kept raw: dimension associativity (CADCraft reads and

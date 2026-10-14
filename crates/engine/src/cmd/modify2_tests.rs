@@ -2,7 +2,7 @@ use cadcraft_doc::{EntityKind, Handle, Space};
 use cadcraft_geom::{Arc, Polyline, Vec2};
 use serde_json::{Value, json};
 
-use crate::Session;
+use crate::{Input, Session};
 
 fn last(s: &Session) -> EntityKind {
     s.doc().unwrap().model.last().unwrap().kind.clone()
@@ -624,6 +624,22 @@ fn textedit_json_and_command_line() {
     s.cmdline("").unwrap();
     assert!(s.running.is_none());
     assert!(matches!(kind(&s, &t), EntityKind::Text(x) if x.value == "hello world"));
+}
+
+#[test]
+fn textedit_on_mtext_exposes_it_to_the_in_place_editor() {
+    let mut s = Session::new();
+    let m = h(&s.execute("mtext", &json!({"at": [0, 5], "text": "a\nb"})).unwrap());
+    s.cmdline("textedit").unwrap();
+    s.cmdline("0,5").unwrap();
+    let mt = s.editing_mtext().expect("the picked mtext is offered to the in-place editor");
+    assert_eq!(mt.contents, "a\\Pb");
+    s.input(Input::Text("c\nd".into())).unwrap();
+    assert!(matches!(kind(&s, &m), EntityKind::MText(x) if x.contents == "c\\Pd"));
+    // The edit landed; Multiple mode asks for the next object, so the editor closes.
+    assert!(s.editing_mtext().is_none());
+    s.cmdline("").unwrap();
+    assert!(s.running.is_none());
 }
 
 #[test]

@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Preference {
-    #[default]
     #[serde(rename = "auto")]
     Auto,
     #[serde(rename = "en")]
@@ -29,6 +28,9 @@ pub enum Preference {
     Russian,
     #[serde(rename = "fr")]
     French,
+    /// The out-of-box default: a first launch with no saved preference shows Chinese.
+    /// "Auto" stays available as an explicit choice that follows the system language.
+    #[default]
     #[serde(rename = "zh")]
     Chinese,
     #[serde(rename = "it")]
@@ -116,7 +118,8 @@ impl Preference {
         Self::ALL.into_iter().find(|p| p.code() == code)
     }
 
-    /// An invalid or obsolete saved choice follows the system language.
+    /// No saved choice, or an invalid or obsolete one, defaults to Chinese (the
+    /// out-of-box default). Picking "Auto" explicitly still follows the system language.
     pub fn restore(saved: Option<&str>) -> Self {
         saved.and_then(Self::parse).unwrap_or_default()
     }

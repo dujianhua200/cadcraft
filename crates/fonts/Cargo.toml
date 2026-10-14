@@ -13,3 +13,6 @@ cadcraft-geom = { workspace = true }
 skrifa = { workspace = true }
 harfrust = { workspace = true }
 unicode-bidi = { workspace = true }
+
+[dev-dependencies]
+cadcraft-doc = { workspace = true }

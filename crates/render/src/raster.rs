@@ -2,7 +2,7 @@
 
 use cadcraft_color::Rgb;
 use cadcraft_geom::{Bounds2, Vec2};
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{BlendMode, FillRule, FilterQuality, IntSize, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 use crate::{DisplayList, Kind};
 
@@ -78,6 +78,29 @@ pub fn render(list: &DisplayList, view: &View, o: &RasterOptions) -> Option<Pixm
     let mut pm = Pixmap::new(view.width, view.height)?;
     pm.fill(tiny_skia::Color::from_rgba8(o.background.0, o.background.1, o.background.2, 255));
     let vis = view.world_bounds();
+    // Basemap tiles first, under the vectors. A quad without an image is a blank
+    // placeholder (missing/failed tile, §9.4): it draws nothing. The quad is
+    // mapped through an affine fit on NW/NE/SW (the TM-projected quad is very
+    // slightly non-rectangular; the SE residual is sub-metre at tile scale).
+    for q in &list.tiles {
+        let Some(img) = &q.image else { continue };
+        let opacity = q.opacity.clamp(0.0, 1.0);
+        if opacity <= 0.0 || img.width == 0 || img.height == 0 {
+            continue;
+        }
+        let Some(size) = IntSize::from_wh(img.width, img.height) else { continue };
+        let Some(tile_pm) = Pixmap::from_vec(img.premultiplied(), size) else { continue };
+        let nw = view.to_screen(q.corners[0]);
+        let ne = view.to_screen(q.corners[1]);
+        let sw = view.to_screen(q.corners[3]);
+        let (w, h) = (img.width as f32, img.height as f32);
+        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        let t = Transform::from_row((ne.0 - nw.0) / w, (ne.1 - nw.1) / w, (sw.0 - nw.0) / h, (sw.1 - nw.1) / h, nw.0, nw.1);
+        let paint = PixmapPaint { opacity: opacity as f32, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
+        pm.draw_pixmap(0, 0, tile_pm.as_ref(), &paint, t, None);
+    }
     for p in &list.prims {
         let c = p.display_rgb(o.background);
         let mut paint = Paint::default();

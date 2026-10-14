@@ -371,10 +371,47 @@ pub fn getstring(ctx: &mut Ctx<'_>, args: Vec<Value>) -> Result<Flow, LispError>
     wait(ctx, GetKind::String { spaces }, msg, None)
 }
 
-/// `(entsel [msg])` and `(nentsel [msg])`.
+/// The entity at `p`, as `entsel` returns it: `(ename point)`. Two elements, not the four
+/// of nested `nentsel` in AutoCAD (ename, point, matrix, block list): routines in the wild
+/// (e.g. a text-alignment tool) branch on the length, and a four-element result would send a
+/// top-level pick down its nested-entity path.
+pub(crate) fn pick_result(s: &Session, p: [f64; 3]) -> Value {
+    let ap = s.settings.pickbox.max(1.0) * s.pixel_size();
+    let Ok(space) = s.state().map(|st| st.edit_space()) else { return Value::Nil };
+    let Ok(d) = s.doc() else { return Value::Nil };
+    match crate::select::pick(d, &space, Vec2::new(p[0], p[1]), ap) {
+        Some(h) => Value::list(vec![Value::Ename(h), Value::point(&p)]),
+        None => Value::Nil,
+    }
+}
+
+/// A value answering an `entsel` prompt: a point picks at once, anything else passes through.
+pub(crate) fn pick_answer(s: &Session, v: Value) -> Value {
+    match v.as_point() {
+        Some(p) => pick_result(s, p),
+        None => v,
+    }
+}
+
+/// `(entsel [msg])`, `(nentsel [pt] [msg])` and `(entselp [pt] [msg])`: with a point the pick
+/// happens at once, without a prompt; without one the user picks.
 pub fn entsel(ctx: &mut Ctx<'_>, args: Vec<Value>) -> Result<Flow, LispError> {
-    let m = message_only(&args)?;
-    wait(ctx, GetKind::EntSel, m, None)
+    let (mut point, mut msg) = (None, String::new());
+    for a in &args {
+        match a {
+            Value::Str(s) => msg = s.to_string(),
+            Value::Cons(_) => point = Some(a.as_point().ok_or_else(|| LispError::bad_arg("2D/3D point", a))?),
+            Value::Nil => {}
+            other => return Err(LispError::bad_arg("stringp", other)),
+        }
+    }
+    if args.len() > 2 {
+        return Err(super::builtins::args_err(false));
+    }
+    match point {
+        Some(p) => Ok(Flow::Value(pick_result(ctx.s, p))),
+        None => wait(ctx, GetKind::EntSel, msg, None),
+    }
 }
 
 /// A second point after the first of `getdist`/`getangle` without a base.

@@ -158,6 +158,14 @@ pub fn get(s: &Session, name: &str) -> Option<Value> {
             let p = if n == "EXTMIN" { e.min } else { e.max };
             json!([p.x, p.y, 0.0])
         }
+        // The current date as a Julian day number (AutoCAD's DATE): routines use it for
+        // throwaway randomness, so it only needs to move, not to match a clock.
+        "DATE" => {
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+            json!(2440587.5 + secs / 86400.0)
+        }
+        // 1 while a command runs, else 0: routines poll it to drain a command's prompts.
+        "CMDACTIVE" => json!(i32::from(s.running.is_some())),
         _ => {
             if let Some(v) = table::get(s, &n) {
                 return Some(v);
@@ -196,8 +204,22 @@ fn as_pt(v: &Value) -> Option<cadcraft_geom::Vec2> {
 }
 
 /// Variables `get` reports from session or drawing state that `set` can't change.
-const READ_ONLY: &[&str] =
-    &["CMDNAMES", "DWGNAME", "DBMOD", "BLOCKEDITOR", "CTAB", "LASTPOINT", "VIEWCTR", "VIEWSIZE", "EXTMIN", "EXTMAX", "UNDOCTL", "UNDOMARKS"];
+const READ_ONLY: &[&str] = &[
+    "CMDNAMES",
+    "DWGNAME",
+    "DBMOD",
+    "BLOCKEDITOR",
+    "CTAB",
+    "LASTPOINT",
+    "VIEWCTR",
+    "VIEWSIZE",
+    "EXTMIN",
+    "EXTMAX",
+    "UNDOCTL",
+    "UNDOMARKS",
+    "DATE",
+    "CMDACTIVE",
+];
 
 pub fn is_read_only(name: &str) -> bool {
     READ_ONLY.iter().any(|r| r.eq_ignore_ascii_case(name.trim())) || table::is_read_only(&name.trim().to_ascii_uppercase())

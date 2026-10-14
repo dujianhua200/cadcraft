@@ -16,6 +16,8 @@ const HIDDEN_CMD: &str = "revcloud";
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    // These tests locate controls by their English labels; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.in_window_menu = false;
     app.integrated_titlebar = true;
     let mut harness = Harness::builder().with_size(vec2(1280.0, 760.0)).build_ui_state(

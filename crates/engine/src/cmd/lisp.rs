@@ -30,7 +30,7 @@ fn source(p: &Value) -> Result<(String, String)> {
     }
     if let Some(data) = str_param(p, "data") {
         let bytes = super::file::base64_decode(data).ok_or_else(|| bad("appload", "invalid base64"))?;
-        return Ok((str_param(p, "name").unwrap_or("untitled.lsp").to_string(), String::from_utf8_lossy(&bytes).into_owned()));
+        return Ok((str_param(p, "name").unwrap_or("untitled.lsp").to_string(), crate::lisp::builtins::decode_text(&bytes)));
     }
     let path = str_param(p, "path").ok_or_else(|| bad("appload", "`path`, or `name` with `data` (base64) or `text`, is required"))?;
     let text = crate::lisp::builtins::read_text_file(path).ok_or_else(|| bad("appload", format!("{path}: can't read the file")))?;

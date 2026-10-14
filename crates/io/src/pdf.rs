@@ -449,7 +449,28 @@ fn sheet(d: &Drawing, space: &Space, o: &PdfOptions, links_to: &[(Handle, String
         }
     }
     let links = links(&list, &map, &clip_pt, links_to);
+    // After the links: the attribution's fresh handles must never be mistaken
+    // for a linked entity's.
+    if cadcraft_doc::gis::basemap_visible(d) {
+        append_plot_attribution(&mut list, &map, &clip_pt, tolerance);
+    }
     Ok(SheetPage { media, list, map, clip_pt, layers, links, label: sheet_name(space) })
+}
+
+/// Append the basemap attribution line to a plot list (§9.2): bottom-left
+/// inside the printable area, 8 pt type, 8 pt inset. The list coordinates
+/// come from inverting `map`; a degenerate mapping skips the attribution.
+fn append_plot_attribution(list: &mut cadcraft_render::DisplayList, map: &Map, clip_pt: &Bounds2, tolerance: f64) {
+    let (s, k) = (map.s, map.k);
+    if !(s.is_finite() && s > 0.0 && k.is_finite() && k > 0.0) {
+        return;
+    }
+    let per_unit = s * k; // points per list unit
+    let height = 8.0 / per_unit;
+    let pt = Vec2::new(clip_pt.min.x + 8.0, clip_pt.min.y + 8.0); // points, bottom-left
+    let at = map.from + (pt / k - map.to) / s;
+    let opts = cadcraft_render::Options { tolerance, ..cadcraft_render::Options::default() };
+    cadcraft_render::append_list(list, cadcraft_render::attribution::attribution_text_list(cadcraft_doc::gis::PLOT_ATTRIBUTION, at, height, &opts));
 }
 
 /// Source and destination origins for the shared model-space PDF/PNG placement behavior.

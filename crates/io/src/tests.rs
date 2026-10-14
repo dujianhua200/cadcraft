@@ -2373,3 +2373,233 @@ fn foreign_table_reads_cell_text_height_and_keeps_style_scale() {
     assert_eq!(t2.cells[0][0].text_height, Some(150.0));
     assert_eq!(t2.cells[0][1].text_height, None);
 }
+
+/// OLE objects are never dropped silently: opening a file that contains them notes, in
+/// Chinese, how many there are and that a DWG save loses them; a DXF round trip keeps the
+/// payload (the 310 binary groups) itself.
+#[test]
+fn ole_objects_are_noted_in_chinese_and_dxf_keeps_them() {
+    let ole = |h: &str, payload: &str| {
+        format!(
+            "0\nOLE2FRAME\n5\n{h}\n100\nAcDbEntity\n8\n0\n100\nAcDbOle2Frame\n10\n1.0\n20\n2.0\n30\n0.0\n310\n{payload}\n310\n{chunks}\n",
+            chunks = payload
+        )
+    };
+    let dxf = format!(
+        "0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n",
+        ole("A1", "00112233445566778899AABBCCDDEEFF") + &ole("A2", "FFEEDDCCBBAA99887766554433221100")
+    );
+    let d = read(dxf.as_bytes(), "ole.dxf").unwrap();
+    assert_eq!(d.read_notes.len(), 1, "{:?}", d.read_notes);
+    let note = &d.read_notes[0];
+    assert!(note.contains("2 个 OLE 对象"), "{note}");
+    assert!(note.contains("DWG"), "{note}");
+    assert!(note.contains("DXF"), "{note}");
+    let ole_tags = |d: &Drawing| {
+        d.model
+            .iter()
+            .filter_map(|e| if let EntityKind::Unknown(u) = &e.kind { Some(u) } else { None })
+            .filter(|u| u.dxf_type == "OLE2FRAME")
+            .map(|u| u.tags.iter().filter(|t| t.code == 310).map(|t| t.value.clone()).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ole_tags(&d).len(), 2);
+    let back = roundtrip(&d);
+    let kept = ole_tags(&back);
+    assert_eq!(kept.len(), 2, "DXF round trip must keep both OLE objects");
+    assert!(
+        kept.iter().all(|tags| tags.iter().any(|v| v.contains("00112233445566778899AABBCCDDEEFF") || v.contains("FFEEDDCCBBAA99887766554433221100"))),
+        "{kept:?}"
+    );
+}
+
+/// A cancelled open returns a cancellation error and no drawing, even for a file large
+/// enough to pass the parser's progress checkpoints.
+#[test]
+fn cancelled_open_returns_no_drawing() {
+    let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+    for i in 0..40_000 {
+        dxf += &format!("0\nLINE\n8\n0\n10\n{i}\n20\n0\n11\n{i}\n21\n10\n");
+    }
+    dxf += "0\nENDSEC\n0\nEOF\n";
+    let progress = OpenProgress::new();
+    progress.cancel();
+    let e = read_with_progress(dxf.as_bytes(), "big.dxf", &progress).unwrap_err();
+    assert!(matches!(e, IoError::Cancelled), "{e}");
+}
+
+/// Opening reports its stages through the progress tracker, so a headless caller can show
+/// the same progress the UI card shows.
+#[test]
+fn open_progress_reports_stages() {
+    let dxf = "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n1\n21\n1\n0\nENDSEC\n0\nEOF\n";
+    let progress = OpenProgress::new();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen2 = seen.clone();
+    progress.set_observer(move |s| {
+        if let Ok(mut v) = seen2.lock() {
+            v.push(s);
+        }
+    });
+    let d = read_with_progress(dxf.as_bytes(), "one.dxf", &progress).unwrap();
+    assert_eq!(d.entity_count(), 1);
+    assert_eq!(progress.stage(), OpenStage::Done);
+    let seen = seen.lock().map(|v| v.clone()).unwrap_or_default();
+    assert!(seen.contains(&OpenStage::DxfParse), "{seen:?}");
+    assert!(seen.contains(&OpenStage::Build), "{seen:?}");
+    assert!(seen.contains(&OpenStage::Done), "{seen:?}");
+}
+
+/// A synthetic OLE2FRAME DXF record: the frame (10/20/30 upper-left, 11/21/31
+/// lower-right) parses into geometry that draws, selects and reports extents; the 310
+/// payload is classified for a cached preview (junk bytes: none; a bare BMP: raster);
+/// malformed 310 groups never break the frame or panic.
+#[test]
+fn ole2frame_parses_frame_and_classifies_preview() {
+    fn hex_chunks(data: &[u8]) -> String {
+        let hex: String = data.iter().map(|b| format!("{b:02X}")).collect();
+        hex.as_bytes().chunks(254).map(|c| format!("310\n{}\n", String::from_utf8_lossy(c))).collect()
+    }
+    fn bmp() -> Vec<u8> {
+        // A minimal 2×2 24-bit BMP: scan_bmp accepts it as a raster preview.
+        let mut b = Vec::new();
+        b.extend_from_slice(b"BM");
+        b.extend_from_slice(&70u32.to_le_bytes());
+        b.extend_from_slice(&[0; 4]);
+        b.extend_from_slice(&54u32.to_le_bytes());
+        b.extend_from_slice(&40u32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&24u16.to_le_bytes());
+        b.extend_from_slice(&[0; 24]);
+        b.extend_from_slice(&[0; 16]);
+        b
+    }
+    let ole = |h: &str, payload: String| {
+        format!(
+            "0\nOLE2FRAME\n5\n{h}\n100\nAcDbEntity\n8\n0\n100\nAcDbOle2Frame\n70\n2\n10\n10.0\n20\n20.0\n30\n0.0\n11\n30.0\n21\n5.0\n31\n0.0\n71\n2\n72\n0\n73\n0\n90\n{payload_len}\n{payload}1\nOLE\n",
+            payload_len = 0,
+        )
+    };
+    let dxf = format!(
+        "0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n",
+        ole("B1", hex_chunks(b"not a compound file, no preview here"))
+            + &ole("B2", hex_chunks(&bmp()))
+            + &ole("B3", "310\nZZZNOTHEX\n310\nABC\n".to_string()),
+    );
+    let d = read(dxf.as_bytes(), "ole-frame.dxf").unwrap();
+    let frames: Vec<OleFrame> = d.model.iter().filter_map(|e| if let EntityKind::Unknown(u) = &e.kind { u.ole.clone() } else { None }).collect();
+    assert_eq!(frames.len(), 3, "all three OLE2FRAME records keep a frame");
+    for f in &frames {
+        assert_eq!((f.upper_left.x, f.upper_left.y), (10.0, 20.0));
+        assert_eq!((f.lower_right.x, f.lower_right.y), (30.0, 5.0));
+        assert_eq!(f.object_type, 2);
+    }
+    assert_eq!(frames[0].preview, None);
+    assert_eq!(frames[1].preview, Some(OlePreviewKind::Raster));
+    assert_eq!(frames[2].preview, None, "malformed 310 groups must not break the frame");
+    // Each frame draws as rectangle + diagonals.
+    for e in d.model.iter() {
+        assert_eq!(e.kind.prims().len(), 6, "{:?}", e.kind);
+    }
+    // A DXF round trip keeps the frame and the payload.
+    let back = roundtrip(&d);
+    let kept: Vec<OleFrame> = back.model.iter().filter_map(|e| if let EntityKind::Unknown(u) = &e.kind { u.ole.clone() } else { None }).collect();
+    assert_eq!(kept.len(), 3);
+    assert!(kept.iter().all(|f| f.upper_left.x == 10.0 && f.lower_right.y == 5.0));
+}
+
+/// Manual verification against the user's real DWG (ignored: set CADCRAFT_OLE_DWG to the
+/// file). Prints open timings split by phase (DWG→DXF, DXF parse incl. OLE preview
+/// classification, classification alone) and asserts every OLE2FRAME has a visible
+/// frame, a classified preview, six placeholder prims, and survives a DXF round trip.
+#[test]
+#[ignore]
+fn ole_user_dwg_all_frames_visible() {
+    use std::time::Instant;
+    let path = std::env::var("CADCRAFT_OLE_DWG").unwrap_or_default();
+    if path.is_empty() {
+        eprintln!("CADCRAFT_OLE_DWG not set; skipping");
+        return;
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    let t0 = Instant::now();
+    let dxf = cadcraft_dwg::dwg_to_dxf(&bytes).unwrap();
+    let dwg_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    let t0 = Instant::now();
+    let d = read(&dxf, "user.dwg").unwrap();
+    let read_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    // Classification alone, re-decoded from each OLE2FRAME record's 310 groups the same
+    // way the reader does (record-scoped: other entities' 310 groups don't count).
+    let t0 = Instant::now();
+    let mut classified = 0usize;
+    let text = String::from_utf8_lossy(&dxf);
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0usize;
+    while i + 1 < lines.len() {
+        if lines[i].trim() == "0" && lines[i + 1].trim() == "OLE2FRAME" {
+            let mut payload: Vec<u8> = Vec::new();
+            let mut j = i + 2;
+            while j + 1 < lines.len() && lines[j].trim() != "0" {
+                if lines[j].trim() == "310" {
+                    let hex = lines[j + 1].trim();
+                    for pair in hex.as_bytes().chunks(2) {
+                        if pair.len() == 2
+                            && let Ok(b) = u8::from_str_radix(std::str::from_utf8(pair).unwrap_or(""), 16)
+                        {
+                            payload.push(b);
+                        }
+                    }
+                }
+                j += 2;
+            }
+            if cadcraft_dwg::ole_preview_kind(&payload).is_some() {
+                classified += 1;
+            }
+            i = j;
+            continue;
+        }
+        i += 2;
+    }
+    let classify_ms = t0.elapsed().as_secs_f64() * 1000.0;
+    eprintln!("open: dwg_to_dxf={dwg_ms:.0}ms read={read_ms:.0}ms classify_alone={classify_ms:.0}ms dxf_bytes={}", dxf.len());
+    let mut frames: Vec<OleFrame> = Vec::new();
+    let mut prims = 0usize;
+    let mut walk = |store: &EntityStore| {
+        for e in store.iter() {
+            if let EntityKind::Unknown(u) = &e.kind
+                && u.dxf_type == "OLE2FRAME"
+            {
+                frames.push(u.ole.clone().expect("OLE2FRAME must parse a frame"));
+                prims += e.kind.prims().len();
+            }
+        }
+    };
+    walk(&d.model);
+    for l in &d.layouts {
+        walk(&l.entities);
+    }
+    for b in d.blocks.values() {
+        walk(&b.entities);
+    }
+    eprintln!("ole_frames={} total_prims={} previewed={}", frames.len(), prims, frames.iter().filter(|f| f.preview.is_some()).count());
+    assert_eq!(frames.len(), 157, "the user's DWG carries 157 OLE2FRAME records");
+    assert!(frames.iter().all(|f| f.is_visible()));
+    assert_eq!(prims, 157 * 6, "each frame draws rectangle + diagonals");
+    assert!(frames.iter().all(|f| f.preview == Some(OlePreviewKind::Emf)), "every OLE in this file carries an EMF cached preview");
+    assert_eq!(classified, 157);
+    // The display list carries the frames (placeholder + label), and its bounds cover them.
+    let list = cadcraft_render::build(&d, &Space::Model, &cadcraft_render::Options::default());
+    assert!(list.prims.len() >= 157 * 6);
+    let min_x = frames.iter().map(|f| f.upper_left.x.min(f.lower_right.x)).fold(f64::INFINITY, f64::min);
+    let max_x = frames.iter().map(|f| f.upper_left.x.max(f.lower_right.x)).fold(f64::NEG_INFINITY, f64::max);
+    assert!(list.bounds.min.x <= min_x && list.bounds.max.x >= max_x);
+    // A DXF round trip keeps all 157 records and their 310 payloads.
+    let back_bytes = write(&d, "user.dxf").unwrap();
+    let back_text = String::from_utf8_lossy(&back_bytes);
+    assert_eq!(back_text.matches("OLE2FRAME").count(), 157);
+    let kept_310 = back_text.lines().filter(|l| l.trim() == "310").count();
+    eprintln!("roundtrip: dxf_bytes={} kept_310_groups={kept_310}", back_bytes.len());
+    assert!(kept_310 > 200_000, "round trip must keep the 310 payloads, kept {kept_310}");
+}

@@ -11,6 +11,9 @@ use crate::theme::Tokens;
 pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     crate::mtext_editor::show(app, ctx);
     crate::quick::quick_properties(app, ctx);
+    // A LISP DCL dialog is not an `app.ui.dialog`: it shows while a routine waits on
+    // `start_dialog`, whatever else is (or isn't) open.
+    crate::dcl_dialog::show(app, ctx);
     let Some(d) = app.ui.dialog.clone() else { return };
     let mut open = true;
     match d.as_str() {
@@ -329,6 +332,12 @@ fn about(ctx: &egui::Context, open: &mut bool) {
                     ui.hyperlink_to(crate::tl!("Join us on Discord"), "https://discord.gg/artcraft");
                     ui.add_space(6.0);
                     ui.label(RichText::new(crate::tl!("MIT OR Apache-2.0. Not affiliated with Autodesk, Inc.")).small().color(t.text_faint));
+                    // Basemap data attribution (§9.2): the about panel carries
+                    // the full OSM attribution + copyright link + licence.
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(crate::tl!("Basemap data")).small().strong().color(t.text_dim));
+                    ui.label(RichText::new(cadcraft_doc::gis::TILE_ATTRIBUTION_FULL).small().color(t.text_dim));
+                    ui.hyperlink_to(crate::tl!("OpenStreetMap copyright"), cadcraft_doc::gis::TILE_COPYRIGHT_URL);
                 }
             }
         });

@@ -9,6 +9,9 @@ CADCraft runs AutoLISP routines (`.lsp` files). What is here and what is not yet
   a `.lsp` file on the window does the same.
 - **`(load "name")`** loads a file by path, with `.lsp` added when the name has none. A file
   APPLOAD loaded is found again by its name, also on the web where there is no file system.
+- **Encoding:** files are read as UTF-8 when valid, otherwise as GBK, so legacy Chinese
+  `.lsp` / `.dcl` files keep their prompts and messages instead of turning into
+  replacement characters.
 - **`(defun c:NAME …)`** defines a command: type `NAME` at the command line. Built-in commands
   keep their names.
 - **At the command line**, `(expression)` evaluates and shows the value, and `!variable` shows a
@@ -52,7 +55,13 @@ reached", malformed source is a reader error, and every built-in checks its argu
 ## Built-in functions
 
 - **Forms:** `quote` `'` `function` `setq` `set` `if` `cond` `while` `repeat` `foreach` `progn`
-  `and` `or` `defun` `defun-q` `lambda` `eval` `apply` `mapcar` `load` `autoload` `exit` `quit`
+  `and` `or` `defun` `defun-q` `lambda` `let` `let*` `eval` `apply` `mapcar` `load` `autoload` `exit` `quit`
+- **`=` / `/=`** compare structurally (`(= nil nil)` is true, `(= x nil)` false, never an
+  error for a non-number); `<` `>` `<=` `>=` stay numeric. `entget` always lists a
+  rotation (50), even when it is 0, and angle groups (50/51/52/53) are radians in
+  `entget`/`entmake`/`entmod`, as in AutoCAD. A local with the same name as a parameter (symbols are
+  case-insensitive) does not clobber the argument. `getvar` returns 1 for `CMDECHO`,
+  `ATTDIA`, `ATTREQ` and `FILLMODE` unless set otherwise.
 - **Numbers:** `+ - * / rem 1+ 1- abs min max sqrt exp log sin cos atan expt fix float gcd
   logand logior lsh ~ = /= < > <= >= zerop minusp numberp`
 - **Lists:** `car cdr` and the `c…r` combinations up to four levels, `cons list append reverse
@@ -68,12 +77,29 @@ reached", malformed source is a reader error, and every built-in checks its argu
   findfile`
 - **Errors:** `*error*`, `vl-catch-all-apply vl-catch-all-error-p vl-catch-all-error-message`
 - **Drawing:** `command` (also `command-s`, `vl-cmdf`) with `pause`, a command left open for the
-  next call, and `(command)` to cancel; `getvar setvar`; `entget entmake entmod entdel entlast
+  next call, and `(command)` to cancel; `getvar setvar`; `entget entmake entmakex entmod entdel entlast
   entnext entupd handent`; `ssget` (modes X, L, P, I, W, C, F, WP, CP, a point, or the user
   selecting; filters with wildcards and `-4` operators) `ssadd ssdel sslength ssname ssmemb
   sssetfirst ssgetfirst`; `tblsearch tblnext` (LAYER, LTYPE, STYLE, BLOCK, DIMSTYLE, APPID)
 - **Input:** `initget getpoint getcorner getdist getangle getorient getreal getint getstring
-  getkword entsel nentsel`
+  getkword entsel nentsel entselp nentselp` (`nentsel`/`nentselp` also take a point and
+  pick at once, without a prompt; the result is `(ename point)`)
+- **Visual LISP, minimal:** `vlax-ename->vla-object` (a VLA object is the entity's name),
+  `vla-get-property` / `vla-put-property` (TextString, Height, Rotation, Layer, Color,
+  InsertionPoint, BoundingBox, Length, Area, StartPoint, EndPoint, …),
+  `vla-get-textstring` / `vla-put-textstring`, `vla-getboundingbox` (writes its two corner
+  points into the named variables), `vlax-safearray->list`,
+  `vlax-curve-getclosestpointto` / `getparamatpoint` / `getfirstderiv` / `getstartpoint` /
+  `getendpoint` (the curve parameter is arc length from the start; the derivative is the
+  unit tangent). `vl-load-com` is a no-op. `return` stops a routine like `exit`.
+- **DCL dialogs:** `load_dialog new_dialog start_dialog action_tile set_tile get_tile
+  mode_tile dimx_tile dimy_tile done_dialog unload_dialog`, plus `start_image fill_image
+  slide_image end_image` (a missing `.sld` is a blank placeholder, never a failure).
+  Dialog files resolve in the support folder first — a Windows-style path such as
+  `d:\autolisp\dcl\auto.dcl` is read as `support/autolisp/dcl/auto.dcl` — then as given.
+  A missing file makes `load_dialog` return nil and print where the file belongs. In a
+  headless run `start_dialog` with no button press returns 0 (dismissed); the UI presses a
+  button by running the action `action_tile` stored for its key.
 - **Units:** `rtos angtos distof angtof`
 - **No-ops:** `vl-load-com gc redraw`; `ver`
 

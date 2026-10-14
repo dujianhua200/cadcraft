@@ -103,6 +103,21 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     };
     let px_per_mm = if lineweights { (k / sheet.unit_mm) as f32 } else { 0.0 };
     let ro = raster::RasterOptions { background: Rgb(255, 255, 255), hairline: 1.0, px_per_mm, antialias: true };
+    if cadcraft_doc::gis::basemap_visible(d) {
+        // Basemap attribution (§9.2): bottom-left of the visible area, 1% inset,
+        // 1.5% type height — in list coordinates, so it plots with the drawing.
+        let vis = view.world_bounds();
+        if !vis.is_empty() {
+            let inset = vis.width() * 0.01;
+            let height = vis.height() * 0.015;
+            let at = Vec2::new(vis.min.x + inset, vis.min.y + inset);
+            let opts = cadcraft_render::Options { tolerance, ..cadcraft_render::Options::default() };
+            cadcraft_render::append_list(
+                &mut list,
+                cadcraft_render::attribution::attribution_text_list(cadcraft_doc::gis::PLOT_ATTRIBUTION, at, height, &opts),
+            );
+        }
+    }
     raster::render_png(&list, &view, &ro).ok_or_else(|| IoError::Format("render failed".into()))
 }
 
@@ -111,7 +126,8 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let Space::Model = space else {
         let (sheet, page) = sheet(d, space, &o)?;
         let transparency = o.plot_transparency.unwrap_or(page.plot_transparency);
-        return Ok(crate::svg::export_window_with(d, space, Some(sheet.bounds()), transparency).into_bytes());
+        let attribution = cadcraft_doc::gis::basemap_visible(d).then_some(cadcraft_doc::gis::PLOT_ATTRIBUTION);
+        return Ok(crate::svg::export_window_with_attribution(d, space, Some(sheet.bounds()), transparency, attribution).into_bytes());
     };
     // Model space as plotted: the plot style table, lineweights, and the table's ends, joins and
     // fills at the scale that fits the window (or the extents) on the device's paper.
@@ -128,6 +144,9 @@ fn svg(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     let mut list = cadcraft_render::build_plot(d, space, &ropts);
     let s = fit_scale(&window.unwrap_or(list.bounds), &sheet, &o);
     cadcraft_render::pen::apply(&mut list, s * sheet.unit_mm);
+    if cadcraft_doc::gis::basemap_visible(d) {
+        crate::svg::append_attribution_to_list(&mut list, window, cadcraft_doc::gis::PLOT_ATTRIBUTION, tolerance);
+    }
     Ok(crate::svg::export_list(&list, window).into_bytes())
 }
 
@@ -166,6 +185,35 @@ mod tests {
         assert!(plot(&d, &layout, &json!({"output": "png", "resolution": f64::NAN, "margins": [1, 2, 3]})).is_ok());
         assert!(plot(&d, &Space::Model, &json!({"output": "dwf"})).is_err());
         assert!(plot(&d, &Space::Model, &json!({})).unwrap().starts_with(b"%PDF"));
+    }
+
+    /// §9.2: a plot carries the basemap attribution in its corner exactly when
+    /// the basemap shows (georef + enabled tile layer); without a georef there
+    /// are no tiles, so no attribution.
+    #[test]
+    fn plot_attribution_corner() {
+        let mut with_basemap = drawing();
+        with_basemap.georef = Some(cadcraft_doc::gis::GeoRef::centred(32.1301, 114.0814));
+        let plain = drawing();
+        let opts = json!({"output": "svg"});
+        let svg_plain = String::from_utf8(plot(&plain, &Space::Model, &opts).unwrap()).unwrap();
+        let svg_attr = String::from_utf8(plot(&with_basemap, &Space::Model, &opts).unwrap()).unwrap();
+        assert!(svg_attr.len() > svg_plain.len(), "the attribution adds vector text to the SVG");
+        // Vector text: stroke polylines (SHX drafting font) or filled-outline paths.
+        let shapes = |s: &str| s.matches("<path").count() + s.matches("<polyline").count();
+        assert!(shapes(&svg_attr) > shapes(&svg_plain), "the attribution is drawn as vector text");
+        let png_plain = plot(&plain, &Space::Model, &json!({"output": "png", "resolution": 100})).unwrap();
+        let png_attr = plot(&with_basemap, &Space::Model, &json!({"output": "png", "resolution": 100})).unwrap();
+        assert_ne!(png_plain, png_attr, "the attribution changes the PNG pixels");
+        let pdf_plain = plot(&plain, &Space::Model, &json!({})).unwrap();
+        let pdf_attr = plot(&with_basemap, &Space::Model, &json!({})).unwrap();
+        assert!(pdf_attr.len() > pdf_plain.len(), "the attribution adds content to the PDF");
+        // Tile layer off: no attribution, even with a georef.
+        let mut off = drawing();
+        off.georef = Some(cadcraft_doc::gis::GeoRef::centred(32.1301, 114.0814));
+        off.tilemap = Some(cadcraft_doc::gis::TileLayer { enabled: false, ..cadcraft_doc::gis::TileLayer::default_osm() });
+        let svg_off = String::from_utf8(plot(&off, &Space::Model, &opts).unwrap()).unwrap();
+        assert_eq!(svg_off.len(), svg_plain.len(), "a disabled tile layer plots no attribution");
     }
 
     #[test]

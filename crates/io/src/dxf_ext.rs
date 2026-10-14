@@ -35,6 +35,13 @@ pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
 pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
 /// Named-object-dictionary key of the XRECORD holding the current multileader style.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
+/// Named-object-dictionary key of the OviMap link's dictionary (`docs/ovimap-link.md`
+/// §4.3): it holds the `GEOREF` XRECORD and the `VERTICES_*` XRECORDs.
+pub(crate) const OVIMAP_GEOREF_KEY: &str = "OVIMAP_GEOREF";
+/// Dictionary entry of the georef XRECORD inside the `OVIMAP_GEOREF` dictionary.
+pub(crate) const OVIMAP_GEOREF_ENTRY: &str = "GEOREF";
+/// Dictionary-entry prefix of a track's vertex-id XRECORD (`VERTICES_<lineGroupId>`).
+pub(crate) const OVIMAP_VERTICES_PREFIX: &str = "VERTICES_";
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
 pub(crate) const MAX_PLOT_STYLE_NAMES: usize = 100_000;
@@ -864,6 +871,61 @@ pub(crate) fn parse_constraints(text: &str) -> Option<(Vec<Constraint>, Parametr
         return None;
     }
     Some((p.constraints, p.parametric))
+}
+
+// ---------- OviMap link (`docs/ovimap-link.md` §4.3) ----------
+
+/// Whether a dictionary key is legal for a `VERTICES_<lineGroupId>` entry (R2).
+/// See [`cadcraft_doc::gis::valid_dict_key`]: illegal keys fail the export, never
+/// silently renamed.
+pub(crate) fn valid_dict_key(key: &str) -> bool {
+    cadcraft_doc::gis::valid_dict_key(key)
+}
+
+/// The GEOREF XRECORD groups (without the 5/330/100/280 record head): §4.3 order —
+/// `1000` projection, `1040` origin_lat / origin_lon / central_meridian / scale_factor /
+/// radius, `1000` metre / WGS84 / `1.0`.
+pub(crate) fn georef_tags(g: &cadcraft_doc::gis::GeoRef) -> Vec<Tag> {
+    g.to_xrecord_tags().iter().map(|t| Tag::new(t.code, tag_value(t.code, &t.value))).collect()
+}
+
+/// The VERTICES_<id> XRECORD groups (without the record head): `1070` vertex count,
+/// then one `1000` per vertex `ovimap_id`, in LWPOLYLINE vertex order (§4.3).
+pub(crate) fn vertices_tags(ids: &[String]) -> Vec<Tag> {
+    let mut tags = vec![Tag::i(1070, i64::try_from(ids.len()).unwrap_or(i64::MAX))];
+    for id in ids {
+        tags.push(Tag::s(1000, id.clone()));
+    }
+    tags
+}
+
+/// Parse a GEOREF XRECORD's groups (`None` when malformed: wrong projection, k0, R,
+/// units, CRS or schema version).
+pub(crate) fn parse_georef_tags(tags: &[Tag]) -> Option<cadcraft_doc::gis::GeoRef> {
+    let raw: Vec<cadcraft_doc::RawTag> = tags.iter().map(|t| cadcraft_doc::RawTag { code: t.code, value: t.str().to_string() }).collect();
+    cadcraft_doc::gis::GeoRef::from_xrecord_tags(&raw)
+}
+
+/// Parse a VERTICES XRECORD's groups: the `1000` vertex ids in order. `None` when the
+/// `1070` count disagrees with the number of ids (a corrupt file).
+pub(crate) fn parse_vertices_tags(tags: &[Tag]) -> Option<Vec<String>> {
+    let count = tags.iter().find(|t| t.code == 1070).map(|t| t.i64())?;
+    let ids: Vec<String> = tags.iter().filter(|t| t.code == 1000).map(|t| t.str().to_string()).collect();
+    if count < 0 || ids.len() as i64 != count {
+        return None;
+    }
+    Some(ids)
+}
+
+/// A `Tag` value for a raw group value: reals parse as reals (so the writer emits the
+/// same digits), everything else stays text.
+fn tag_value(code: i32, value: &str) -> cadcraft_dxf::Value {
+    use cadcraft_dxf::{Kind, Value, kind_of};
+    match kind_of(code) {
+        Kind::Real => value.trim().parse::<f64>().ok().filter(|x| x.is_finite()).map(Value::Real).unwrap_or_else(|| Value::Str(value.to_string())),
+        Kind::Int16 | Kind::Int32 | Kind::Int64 => value.trim().parse::<i64>().ok().map(Value::Int).unwrap_or_else(|| Value::Str(value.to_string())),
+        _ => Value::Str(value.to_string()),
+    }
 }
 
 #[cfg(test)]

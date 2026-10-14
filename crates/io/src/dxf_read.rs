@@ -515,9 +515,18 @@ fn entity(kind: &str, tags: &[Tag]) -> Option<(Common, EntityKind)> {
                 text: t.s(1).unwrap_or_default().chars().take(MAX_FRAME_CHARS).collect(),
             })
         }
+        // OLE2FRAME: kept as an Unknown record like every other unmodelled type, but
+        // with its frame parsed once here (see `ole_frame`) so it draws, selects and
+        // reports extents instead of staying invisible.
+        "OLE2FRAME" => EntityKind::Unknown(Unknown {
+            dxf_type: "OLE2FRAME".to_string(),
+            tags: tags.iter().map(|tg| RawTag { code: tg.code, value: tg.str() }).collect(),
+            ole: ole_frame(tags),
+        }),
         other => EntityKind::Unknown(Unknown {
             dxf_type: other.to_string(),
             tags: tags.iter().map(|tg| RawTag { code: tg.code, value: tg.str() }).collect(),
+            ole: None,
         }),
     };
     Some((c, k))
@@ -1097,11 +1106,23 @@ fn entity_extras(kind: &str, tags: &[Tag], h: Handle, k: &mut EntityKind, rx: &m
 }
 
 /// Parse a run of entity records (ENTITIES section or a block's body) into entities. Records that
-/// can't be placed are counted in `skipped`.
-fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, skipped: &mut usize) -> Vec<(Option<String>, bool, Entity)> {
+/// can't be placed are counted in `skipped`. A cancelled `progress` stops the parse with
+/// [`IoError::Cancelled`]; the caller discards everything.
+fn parse_entities(
+    recs: &[(String, Vec<Tag>)],
+    d: &mut Drawing,
+    rx: &mut Rx,
+    skipped: &mut usize,
+    progress: Option<&OpenProgress>,
+) -> Result<Vec<(Option<String>, bool, Entity)>> {
     let mut out = Vec::new();
     let mut i = 0;
     while let Some((kind, tags)) = recs.get(i) {
+        // Checked in batches, so a large BLOCKS section can still be abandoned promptly
+        // without testing the flag on every record.
+        if i % 4096 == 0 && progress.is_some_and(|p| p.is_cancelled()) {
+            return Err(IoError::Cancelled);
+        }
         let t = T(tags);
         let owner = crate::dxf_ext::owner(tags);
         let paper = t.i(67) == Some(1);
@@ -1243,7 +1264,7 @@ fn parse_entities(recs: &[(String, Vec<Tag>)], d: &mut Drawing, rx: &mut Rx, ski
             seen.insert(e.handle);
         }
     }
-    out
+    Ok(out)
 }
 
 /// Faces of a polyface mesh: each face record names three or four vertices by 1-based index;
@@ -1648,7 +1669,29 @@ fn ltype_pattern(tags: &[Tag], styles: &HashMap<String, String>) -> Vec<DashElem
 
 /// Read a DXF file into a drawing.
 pub fn read(bytes: &[u8]) -> Result<Drawing> {
-    let tags = cadcraft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
+    read_with_progress(bytes, None)
+}
+
+/// [`read`], reporting the stage in `progress` (when given) and stopping early when it is
+/// cancelled. A cancelled read returns [`IoError::Cancelled`] and no drawing.
+pub fn read_with_progress(bytes: &[u8], progress: Option<&OpenProgress>) -> Result<Drawing> {
+    if let Some(p) = progress {
+        p.set_stage(OpenStage::DxfParse);
+    }
+    let tags = match progress {
+        Some(p) => cadcraft_dxf::parse_with_progress(bytes, &mut |_| !p.is_cancelled()),
+        None => cadcraft_dxf::parse(bytes),
+    }
+    .map_err(|e| match e {
+        cadcraft_dxf::DxfError::Cancelled { .. } => IoError::Cancelled,
+        e => IoError::Format(e.to_string()),
+    })?;
+    if progress.is_some_and(|p| p.is_cancelled()) {
+        return Err(IoError::Cancelled);
+    }
+    if let Some(p) = progress {
+        p.set_stage(OpenStage::Build);
+    }
     let secs = sections(&tags);
     if secs.is_empty() {
         return Err(IoError::Format("no sections found".into()));
@@ -1674,6 +1717,9 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
     let mut skipped = std::collections::BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
+        if progress.is_some_and(|p| p.is_cancelled()) {
+            return Err(IoError::Cancelled);
+        }
         match s.name.as_str() {
             "HEADER" => header(&s.tags, &mut d),
             "TABLES" => tables(&s.tags, &mut d, &mut rx),
@@ -1700,7 +1746,7 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
                             j += 1;
                         }
                         let body = recs.get(i + 1..j).unwrap_or(&[]);
-                        let ents = parse_entities(body, &mut d, &mut rx, &mut n);
+                        let ents = parse_entities(body, &mut d, &mut rx, &mut n, progress)?;
                         blocks.push((name, base, description, ents, xref));
                         i = j + 1;
                     } else {
@@ -1716,7 +1762,7 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
             // A damaged file may split its entities over several ENTITIES sections (#865).
             "ENTITIES" => {
                 let mut n = 0;
-                entities.extend(parse_entities(&records(&s.tags), &mut d, &mut rx, &mut n));
+                entities.extend(parse_entities(&records(&s.tags), &mut d, &mut rx, &mut n, progress)?);
                 count_skipped(&mut skipped, "ENTITIES", n);
             }
             "OBJECTS" => {
@@ -1831,7 +1877,98 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
     }
     crate::dxf_raw::read(&secs, &mut d);
     d.skipped_records = skipped;
+    ole_note(&mut d);
+    if let Some(p) = progress {
+        p.set_stage(OpenStage::Done);
+    }
     Ok(d)
+}
+
+/// Parse an OLE2FRAME's frame from its DXF groups (DXF Reference: 10/20/30 upper-left
+/// corner, 11/21/31 lower-right corner, 3 source application, 71 object type). `None` when
+/// the corners are missing, non-finite or degenerate — such a record keeps the old
+/// behaviour (an invisible kept record). The 310 binary payload is decoded (capped, see
+/// below) only to classify the cached preview; the picture bytes are not kept.
+fn ole_frame(tags: &[Tag]) -> Option<OleFrame> {
+    let t = T(tags);
+    let upper_left = t.p(10);
+    let lower_right = t.p(11);
+    let frame = OleFrame {
+        upper_left,
+        lower_right,
+        source_app: t.s(3).unwrap_or_default().chars().take(256).collect(),
+        object_type: t.i(71).and_then(|v| i16::try_from(v.clamp(-32768, 32767)).ok()).unwrap_or(2),
+        preview: ole_preview(tags),
+    };
+    frame.is_visible().then_some(frame)
+}
+
+/// Classify the cached preview in an OLE2FRAME's 310 binary groups: hex-decode them (each
+/// chunk is at most 127 bytes) and hand the bytes to the DWG bridge's classifier. The
+/// decode stops and reports no preview when the payload is malformed or over the
+/// classifier's cap — hostile input must not make opening a file allocate without bound.
+fn ole_preview(tags: &[Tag]) -> Option<OlePreviewKind> {
+    let mut bytes: Vec<u8> = Vec::new();
+    for tg in tags.iter().filter(|x| x.code == 310) {
+        let mut hi: Option<u8> = None;
+        for b in tg.str().bytes() {
+            let n = match b {
+                b'0'..=b'9' => b - b'0',
+                b'a'..=b'f' => b - b'a' + 10,
+                b'A'..=b'F' => b - b'A' + 10,
+                b' ' | b'\t' | b'\r' | b'\n' => continue,
+                _ => return None,
+            };
+            match hi.take() {
+                None => hi = Some(n),
+                Some(h) => {
+                    if bytes.len() >= cadcraft_dwg::MAX_OLE_PREVIEW_BYTES {
+                        return None;
+                    }
+                    bytes.push((h << 4) | n);
+                }
+            }
+        }
+        if hi.is_some() {
+            return None;
+        }
+    }
+    if bytes.is_empty() {
+        return None;
+    }
+    // The DWG bridge's kind is its own type (it cannot depend on the doc crate);
+    // map it onto the doc's kind.
+    match cadcraft_dwg::ole_preview_kind(&bytes) {
+        Some(cadcraft_dwg::OlePreviewKind::Raster) => Some(OlePreviewKind::Raster),
+        Some(cadcraft_dwg::OlePreviewKind::Dib) => Some(OlePreviewKind::Dib),
+        Some(cadcraft_dwg::OlePreviewKind::Emf) => Some(OlePreviewKind::Emf),
+        Some(cadcraft_dwg::OlePreviewKind::Wmf) => Some(OlePreviewKind::Wmf),
+        None => None,
+    }
+}
+
+/// The OLE objects in a drawing, by DXF type: entities CADCraft keeps only as unmodelled
+/// records. Their embedded payload (the 310 binary groups) is carried in the record, not
+/// interpreted, and the DWG writer cannot write them back.
+fn ole_count(d: &Drawing) -> usize {
+    let in_store = |ents: &cadcraft_doc::EntityStore| {
+        ents.iter().filter(|e| matches!(&e.kind, EntityKind::Unknown(u) if u.dxf_type.eq_ignore_ascii_case("OLE2FRAME"))).count()
+    };
+    in_store(&d.model)
+        + d.layouts.iter().map(|l| in_store(&l.entities)).sum::<usize>()
+        + d.blocks.values().map(|b| in_store(&b.entities)).sum::<usize>()
+}
+
+/// Tell the reader, in the drawing's own notes, that OLE objects are present and what saving
+/// does to them — never silently. The note goes on every read (DXF or DWG) that contains one.
+fn ole_note(d: &mut Drawing) {
+    let n = ole_count(d);
+    if n == 0 {
+        return;
+    }
+    d.read_notes.push(format!(
+        "本文件含 {n} 个 OLE 对象（嵌入内容），打开时显示为占位框（嵌入内容本身未加载，不可就地编辑）；另存为 DWG 时这些对象将丢失，另存为 DXF 可保留。"
+    ));
 }
 
 fn count_skipped(skipped: &mut std::collections::BTreeMap<String, usize>, section: &str, n: usize) {
@@ -1918,6 +2055,10 @@ struct Objects {
     scales: Vec<cadcraft_doc::AnnoScale>,
     /// XRECORD handle (upper case) → its groups.
     xrecords: HashMap<String, Vec<Tag>>,
+    /// Dictionary handle (upper case) → its entries: (entry name, entry handle upper case).
+    /// Kept per dictionary (not just the root) so nested dictionaries — the OviMap
+    /// `OVIMAP_GEOREF` dictionary — can be resolved by handle.
+    dict_entries: HashMap<String, Vec<(String, String)>>,
     /// TABLESTYLE objects: (handle, groups).
     table_styles: Vec<(String, Vec<Tag>)>,
     /// DIMASSOC objects.
@@ -1947,18 +2088,23 @@ impl Objects {
             }
             "DICTIONARY" => {
                 let mut name: Option<String> = None;
+                let mut entries: Vec<(String, String)> = Vec::new();
                 for t in tags {
                     match t.code {
                         3 => name = Some(t.str()),
                         350 | 360 => {
-                            if let Some(n) = name.take()
-                                && self.names.len() < MAX_OBJECTS
-                            {
-                                self.names.insert(t.str().trim().to_ascii_uppercase(), n);
+                            if let Some(n) = name.take() {
+                                if self.names.len() < MAX_OBJECTS {
+                                    self.names.insert(t.str().trim().to_ascii_uppercase(), n.clone());
+                                }
+                                entries.push((n, t.str().trim().to_ascii_uppercase()));
                             }
                         }
                         _ => {}
                     }
+                }
+                if !h.is_empty() && !entries.is_empty() {
+                    self.dict_entries.entry(h).or_default().extend(entries);
                 }
             }
             "XRECORD" if self.xrecords.len() < MAX_OBJECTS => {
@@ -2052,6 +2198,31 @@ impl Objects {
         // The drawing's plot style tables.
         if let Some(tables) = self.xrecord_text(crate::dxf_ext::PLOT_STYLES_KEY).and_then(|t| crate::dxf_ext::parse_plot_styles(&t)) {
             d.plot_style_tables = tables;
+        }
+        // OviMap link (§4.3): the OVIMAP_GEOREF dictionary (an entry of any dictionary;
+        // normally the root named object dictionary) holds the GEOREF XRECORD and one
+        // VERTICES_<lineGroupId> XRECORD per track. A malformed entry is ignored with a
+        // read note, never a failed open.
+        for entries in self.dict_entries.values() {
+            let Some((_, dict_handle)) = entries.iter().find(|(k, _)| k == crate::dxf_ext::OVIMAP_GEOREF_KEY) else { continue };
+            let Some(sub) = self.dict_entries.get(&dict_handle.to_ascii_uppercase()) else { continue };
+            for (name, handle) in sub {
+                let Some(tags) = self.xrecords.get(&handle.to_ascii_uppercase()) else { continue };
+                if name == crate::dxf_ext::OVIMAP_GEOREF_ENTRY {
+                    match crate::dxf_ext::parse_georef_tags(tags) {
+                        Some(g) => d.georef = Some(g),
+                        None => d.read_notes.push("OVIMAP_GEOREF 字典中的 GEOREF XRECORD 无法解析（投影名/k0/半径/单位不符），已忽略".into()),
+                    }
+                } else if let Some(track_id) = name.strip_prefix(crate::dxf_ext::OVIMAP_VERTICES_PREFIX) {
+                    match crate::dxf_ext::parse_vertices_tags(tags) {
+                        Some(ids) => {
+                            let e = d.ovimap_ext.entry(track_id.to_string()).or_default();
+                            e.vertices = ids.iter().map(|v| serde_json::json!({ "ovimap_id": v })).collect();
+                        }
+                        None => d.read_notes.push(format!("轨迹 `{track_id}` 的 VERTICES XRECORD 损坏（1070 计数与 1000 数量不符），顶点 ID 已丢失")),
+                    }
+                }
+            }
         }
         // Multileader styles (named by their ACAD_MLEADERSTYLE dictionary entries).
         for (h, tags) in &self.mleader_styles {

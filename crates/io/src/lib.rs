@@ -12,6 +12,7 @@ mod dxf_read;
 mod dxf_table;
 mod dxf_write;
 mod dxf_xref;
+pub mod geojson;
 pub mod pdf;
 pub mod plotter;
 pub mod svg;
@@ -23,6 +24,7 @@ mod dxf_mline;
 use cadcraft_doc::{Drawing, Space};
 use cadcraft_geom::Bounds2;
 
+pub use cadcraft_doc::{OpenProgress, OpenStage};
 pub use cadcraft_dxf::Version;
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::entity_groups;
@@ -49,6 +51,9 @@ pub enum IoError {
     Format(String),
     #[error("unsupported file type `{0}`")]
     Unsupported(String),
+    /// Opening was cancelled: no half-built drawing is returned.
+    #[error("打开已取消")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, IoError>;
@@ -60,16 +65,32 @@ fn ext(name: &str) -> String {
 /// Read a drawing; the format comes from the content (DXF ASCII/binary, DWG) or the name
 /// (SVG and gzip-compressed SVGZ).
 pub fn read(bytes: &[u8], name: &str) -> Result<Drawing> {
+    let progress = OpenProgress::new();
+    read_with_progress(bytes, name, &progress)
+}
+
+/// [`read`], reporting the stage in `progress` and stopping early when it is cancelled.
+/// A cancelled read returns [`IoError::Cancelled`] and no drawing.
+pub fn read_with_progress(bytes: &[u8], name: &str, progress: &OpenProgress) -> Result<Drawing> {
     if cadcraft_dwg::is_dwg(bytes) {
+        progress.set_stage(OpenStage::DwgDecode);
+        if progress.is_cancelled() {
+            return Err(IoError::Cancelled);
+        }
         let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
-        let mut d = dxf_read::read(&dxf).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
-        d.read_notes = notes;
+        if progress.is_cancelled() {
+            return Err(IoError::Cancelled);
+        }
+        let mut d =
+            dxf_read::read_with_progress(&dxf, Some(progress)).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
+        d.read_notes.extend(notes);
+        progress.set_stage(OpenStage::Done);
         return Ok(d);
     }
     match ext(name).as_str() {
         "svg" | "svgz" => svg_read::read(bytes),
-        "dxf" | "" => dxf_read::read(bytes),
-        e if bytes.len() > 4 => dxf_read::read(bytes).map_err(|_| IoError::Unsupported(e.to_string())),
+        "dxf" | "" => dxf_read::read_with_progress(bytes, Some(progress)),
+        e if bytes.len() > 4 => dxf_read::read_with_progress(bytes, Some(progress)).map_err(|_| IoError::Unsupported(e.to_string())),
         e => Err(IoError::Unsupported(e.to_string())),
     }
 }

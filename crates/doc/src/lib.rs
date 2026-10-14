@@ -11,10 +11,12 @@ mod constraint;
 mod entity;
 mod extents;
 mod gdt;
+pub mod gis;
 mod header;
 pub mod library;
 mod plotstyle;
 mod plotter;
+mod progress;
 mod refedit;
 mod store;
 mod tables;
@@ -31,6 +33,7 @@ pub use gdt::*;
 pub use header::{HVal, Header};
 pub use plotstyle::*;
 pub use plotter::*;
+pub use progress::{OpenProgress, OpenStage};
 pub use refedit::{RefEdit, WorkItem};
 pub use store::EntityStore;
 pub use tables::*;
@@ -127,6 +130,19 @@ pub struct Drawing {
     /// Records of the file this drawing was read from that the reader could not place (a damaged
     /// file), counted by the section they came from. Never written to a file.
     pub skipped_records: BTreeMap<String, usize>,
+    /// OviMap link: the drawing's geographic reference (WGS-84 ↔ CAD metres,
+    /// `docs/ovimap-link.md` §3). Written to DXF as the `OVIMAP_GEOREF` dictionary's
+    /// `GEOREF` XRECORD; `None` = no georef (link import/export refuse without one).
+    pub georef: Option<gis::GeoRef>,
+    /// OviMap link: the tile basemap layer (§9). Display-only; never written to DXF.
+    pub tilemap: Option<gis::TileLayer>,
+    /// OviMap link: per-feature extension areas, keyed by `ovimap_id` (everything the
+    /// 4-group xdata cannot carry: note, photos, business fields, passthrough, track
+    /// vertices). In-memory only; DXF save keeps just the vertex ids (§4.6).
+    pub ovimap_ext: BTreeMap<String, gis::OvimapExt>,
+    /// OviMap link: the file's `ovimap_meta`, carried back verbatim on export
+    /// (its `exporter`/`exported_at` are refreshed). Never written to DXF.
+    pub ovimap_meta: Option<serde_json::Value>,
 }
 
 impl Default for Drawing {
@@ -183,6 +199,10 @@ impl Drawing {
             read_notes: Vec::new(),
             refedit: None,
             skipped_records: BTreeMap::new(),
+            georef: None,
+            tilemap: None,
+            ovimap_ext: BTreeMap::new(),
+            ovimap_meta: None,
         }
     }
 

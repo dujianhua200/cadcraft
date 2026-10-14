@@ -23,6 +23,10 @@ pub type PlotHook = fn(&Drawing, &cadcraft_doc::Space, &Value) -> std::result::R
 /// File format hooks (installed by the app so the engine stays I/O-agnostic and wasm-safe).
 pub struct IoHooks {
     pub read: fn(&[u8], &str) -> std::result::Result<Drawing, String>,
+    /// Like [`IoHooks::read`], reporting the stage in `progress` and stopping early when it is
+    /// cancelled. Hosts whose reader has no progress support leave it `None`: the engine then
+    /// falls back to [`IoHooks::read`], which cannot be cancelled mid-read.
+    pub read_progress: Option<fn(&[u8], &str, &cadcraft_doc::OpenProgress) -> std::result::Result<Drawing, String>>,
     pub write: fn(&Drawing, &str) -> std::result::Result<Vec<u8>, String>,
     /// PLOT / EXPORTPDF (optional: builds without a plotter report "not available").
     pub plot: Option<PlotHook>,
@@ -260,11 +264,18 @@ pub struct ReadFile {
 
 /// Read and decode `path` (the slow half of `OPEN {path}`). Needs no session; runs anywhere.
 pub fn read_file(path: &str) -> std::result::Result<ReadFile, String> {
+    let progress = cadcraft_doc::OpenProgress::new();
+    read_file_with_progress(path, &progress)
+}
+
+/// [`read_file`], reporting the stage in `progress` and stopping early when it is cancelled.
+/// A cancelled read is an error and never produces a half-built drawing.
+pub fn read_file_with_progress(path: &str, progress: &cadcraft_doc::OpenProgress) -> std::result::Result<ReadFile, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let r = std::panic::catch_unwind(|| {
             let bytes = std::fs::read(path).map_err(|e| bad("open", format!("{path}: {e}")))?;
-            read_bytes(&bytes, path, Some(path.to_string()))
+            read_bytes_with_progress(&bytes, path, Some(path.to_string()), Some(progress))
         });
         match r {
             Ok(r) => r.map_err(|e| e.to_string()),
@@ -273,7 +284,7 @@ pub fn read_file(path: &str) -> std::result::Result<ReadFile, String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = path;
+        let _ = (path, progress);
         Err(bad("open", "paths are not available on the web; pass `data`").to_string())
     }
 }
@@ -287,8 +298,15 @@ pub fn finish_open(s: &mut Session, f: ReadFile) -> Result<Value> {
 }
 
 fn read_bytes(bytes: &[u8], name: &str, path: Option<String>) -> Result<ReadFile> {
+    read_bytes_with_progress(bytes, name, path, None)
+}
+
+fn read_bytes_with_progress(bytes: &[u8], name: &str, path: Option<String>, progress: Option<&cadcraft_doc::OpenProgress>) -> Result<ReadFile> {
     let hooks = io().ok_or_else(|| bad("open", "file formats are not available in this build"))?;
-    let drawing = (hooks.read)(bytes, name).map_err(|e| bad("open", e))?;
+    let drawing = match (progress, hooks.read_progress) {
+        (Some(p), Some(read)) => read(bytes, name, p).map_err(|e| bad("open", e))?,
+        _ => (hooks.read)(bytes, name).map_err(|e| bad("open", e))?,
+    };
     // A file that isn't a drawing (an imported SVG) gives the drawing no file name: QSAVE then
     // asks where to save instead of exporting over the original.
     let path = path.filter(|p| is_drawing_file(p));
@@ -532,7 +550,7 @@ pub fn not_saved_message(lost: &std::collections::BTreeMap<String, usize>) -> Op
         return None;
     }
     let list: Vec<String> = lost.iter().map(|(t, n)| format!("{n} {t}")).collect();
-    Some(format!("Not saved in the DWG file (its writer can't write these object types yet; DXF keeps them): {}", list.join(", ")))
+    Some(format!("未保存到 DWG 文件中（其写入器尚不支持这些对象类型；DXF 会保留它们）：{}", list.join("，")))
 }
 
 /// Whether saving to `path` leaves out the entities [`not_saved`] counts: DWG does (the DWG

@@ -35,6 +35,10 @@ sys-locale = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.21", default-features = false }
+# Finder double-click / "Open With" / Dock drop arrive as an open-documents Apple Event,
+# which winit 0.30 does not forward: `open_file` answers it through this crate's safe API
+# (the Objective-C handler lives there, so no `unsafe` here).
+fmv-macos-events = "0.1.0"
 # View ▸ Accessibility ▸ Animation Effects ▸ Use System Setting: the system's Reduce motion
 # (system_animations.rs). Already in Cargo.lock through muda.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSAccessibility"] }

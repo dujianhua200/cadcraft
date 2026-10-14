@@ -385,6 +385,18 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
                     .color(t.text_dim),
                 );
             });
+            // Basemap attribution (§9.2): the layer-properties panel carries
+            // the full attribution + link, like the about panel.
+            if let Some((attr, url)) = crate::tiles::attribution_full(d) {
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(crate::tl!("Basemap")).small().strong().color(t.text_dim));
+                    ui.label(RichText::new(attr).small().color(t.text_dim));
+                    if let Some(url) = url {
+                        ui.hyperlink_to(crate::tl!("Copyright"), url);
+                    }
+                });
+            }
         });
     ctx.data_mut(|dd| dd.insert_temp(sid, st));
     for (c, p) in actions {

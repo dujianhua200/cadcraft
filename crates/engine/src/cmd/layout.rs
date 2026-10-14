@@ -1072,6 +1072,7 @@ mod tests {
     #[test]
     fn plot_goes_through_the_hook() {
         super::super::file::set_io(super::super::file::IoHooks {
+            read_progress: None,
             read: |_, _| Err("no reader in tests".into()),
             write: |_, _| Err("no writer in tests".into()),
             plot: Some(fake_plot),

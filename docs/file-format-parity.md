@@ -48,12 +48,19 @@ title/header suppression.
 | 2010–2012 | AC1024 | read, write | via bridge | yes | `dwg_at_every_version_reads_back`, `ac1024_dwg_with_many_entities_opens` |
 | 2013–2017 | AC1027 | read, write | via bridge | yes | `dwg_at_every_version_reads_back` |
 | 2018–2027 | AC1032 | read, write (default) | via bridge; untested on real files | yes (default for new drawings) | `dwg_at_every_version_reads_back` (synthetic only) |
-| Web build | — | — | **no** (error: "save as DXF") | no | — |
+| Web build | — | — | **no** (the error says why: DWG decoding needs memory-mapping and native code, which the browser sandbox has no; save as DXF instead) | no | — |
 
 Everything lost in the DXF read/write paths below is also lost through DWG, plus whatever
 `acadrust`'s own DXF output omits (proxy objects, ACIS data, custom objects: not measured). User
 report #57: a 10 MB DWG failed after about two minutes; limits now stop runaway conversions
 early (#175), but the throughput problem remains. **DWG ≈ 30% read, ≈ 15% write.**
+
+Opening a large file reports its stage (DWG decode / DXF parse / build) and can be cancelled:
+the desktop "Opening …" card shows the stage and elapsed time with a Cancel button, and
+`cadcraft_io::read_with_progress` exposes the same progress to headless callers. A cancelled
+open returns an error and no half-built drawing. OLE2FRAME objects are noted on open (how many,
+and that a DWG save loses them while DXF keeps them); the save command already lists what a DWG
+save leaves out, so the loss is never silent.
 
 ## DXF, version by version
 
