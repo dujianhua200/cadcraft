@@ -8,7 +8,10 @@ use egui::Color32;
 use serde_json::{Value, json};
 
 fn app() -> CadApp {
-    CadApp::new(Session::new(), Services::default())
+    let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests assert English dialog text; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
+    app
 }
 
 fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {

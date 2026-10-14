@@ -177,15 +177,15 @@ fn locale_and_saved_preference_resolution() {
     assert_eq!(Preference::Auto.resolve(&["de-DE".into(), "en-US".into()]), "de");
     assert_eq!(Preference::Auto.resolve(&["en-US".into(), "uk-UA".into()]), "en");
     assert_eq!(Preference::Auto.resolve(&[]), "en");
-    assert_eq!(Preference::restore(None), Preference::Auto);
-    assert_eq!(Preference::restore(Some("obsolete")), Preference::Auto);
+    assert_eq!(Preference::restore(None), Preference::Chinese);
+    assert_eq!(Preference::restore(Some("obsolete")), Preference::Chinese);
     for preference in Preference::ALL {
         assert_eq!(Preference::restore(Some(preference.code())), preference);
         let saved = serde_json::to_string(&preference).unwrap();
         assert_eq!(serde_json::from_str::<Preference>(&saved).unwrap(), preference);
     }
     assert!(serde_json::from_str::<Preference>("\"unsupported\"").is_err());
-    assert_eq!(serde_json::from_value::<crate::UiState>(json!({})).unwrap().interface_language, Preference::Auto);
+    assert_eq!(serde_json::from_value::<crate::UiState>(json!({})).unwrap().interface_language, Preference::Chinese);
     // Saved with the host's other preferences; a bad saved value keeps the current choice.
     let mut a = CadApp::new(Session::new(), Services::default());
     a.ui.interface_language = Preference::Ukrainian;
@@ -194,6 +194,35 @@ fn locale_and_saved_preference_resolution() {
     assert_eq!(b.ui.interface_language, Preference::Ukrainian);
     b.load_prefs(r#"{"interfaceLanguage":"klingon"}"#);
     assert_eq!(b.ui.interface_language, Preference::Ukrainian);
+}
+
+/// The out-of-box default is Simplified Chinese; an explicit "Auto" still follows the
+/// system language (a Chinese system resolves to Chinese, an English one to English).
+#[test]
+fn default_language_is_chinese_and_auto_follows_a_chinese_system() {
+    assert_eq!(Preference::default(), Preference::Chinese);
+    assert_eq!(Preference::restore(None), Preference::Chinese);
+    // A fresh app with no saved preferences persists Chinese, not "auto".
+    let fresh = CadApp::new(Session::new(), Services::default());
+    assert_eq!(fresh.ui.interface_language, Preference::Chinese);
+    assert!(fresh.prefs_json().contains(r#""interfaceLanguage":"zh""#));
+    // "Auto" keeps following the system: Chinese systems land on Chinese.
+    for tag in ["zh", "zh-CN", "zh_CN.UTF-8", "ZH-tw", " zh-HK "] {
+        assert_eq!(locale_language(tag), Some("zh"), "{tag}");
+        assert_eq!(Preference::Auto.resolve(&[tag.into()]), "zh", "{tag}");
+    }
+    assert_eq!(Preference::Auto.resolve(&["en-US".into()]), "en");
+    assert_eq!(Preference::Auto.resolve(&["pl-PL".into(), "zh-CN".into()]), "zh");
+    // The Chinese catalog covers the whole English key set: every key any catalog has.
+    let mut english = BTreeSet::new();
+    for language in &LANGUAGES {
+        english.extend(parse(language.source).0.into_keys());
+    }
+    let zh = catalog("zh").unwrap();
+    assert_eq!(zh.len(), english.len());
+    assert!(english.iter().all(|key| zh.contains_key(key)));
+    assert_eq!(tr("zh", "Plot"), "打印");
+    assert_eq!(tr_menu("zh", "View"), "视图");
 }
 
 #[test]
@@ -308,6 +337,8 @@ fn render(app: &mut CadApp, ctx: &egui::Context) -> String {
 #[test]
 fn live_switch_translates_the_shell_without_mutating_drawing_or_automation() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests start from English and then switch; the out-of-box default is Chinese.
+    app.ui.interface_language = Preference::English;
     app.ui.in_window_menu = true;
     app.session.state_mut().unwrap().title = "Open".into();
     let ctx = egui::Context::default();
@@ -467,6 +498,8 @@ fn czech_menu_headings_keep_object_labels_and_other_catalogs() {
 #[test]
 fn live_czech_switch_preserves_drawing_command_and_saved_choice() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests start from English and then switch; the out-of-box default is Chinese.
+    app.ui.interface_language = Preference::English;
     app.ui.in_window_menu = true;
     app.session.state_mut().unwrap().title = "Open".into();
     let ctx = egui::Context::default();
@@ -660,6 +693,8 @@ fn korean_locale_saved_preference_and_single_count_form() {
 #[test]
 fn korean_live_switch_keeps_automation_and_drawing_and_falls_back_without_font() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests start from English and then switch; the out-of-box default is Chinese.
+    app.ui.interface_language = Preference::English;
     app.ui.in_window_menu = true;
     app.session.state_mut().unwrap().title = "Open".into();
     let ctx = egui::Context::default();
@@ -825,6 +860,8 @@ fn swedish_menu_headings_keep_object_labels() {
 #[test]
 fn live_swedish_switch_preserves_drawing_command_and_saved_choice() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests start from English and then switch; the out-of-box default is Chinese.
+    app.ui.interface_language = Preference::English;
     app.ui.in_window_menu = true;
     app.session.state_mut().unwrap().title = "Open".into();
     let ctx = egui::Context::default();

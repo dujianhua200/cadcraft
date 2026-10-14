@@ -2,10 +2,14 @@
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="image/vnd.dxf">
     <comment>DXF drawing</comment>
+    <!-- The .desktop file also lists this historic name; the alias keeps it resolving here. -->
+    <alias type="application/x-dxf"/>
     <glob pattern="*.dxf"/>
   </mime-type>
   <mime-type type="image/vnd.dwg">
     <comment>DWG drawing</comment>
+    <!-- The .desktop file also lists this historic name; the alias keeps it resolving here. -->
+    <alias type="application/acad"/>
     <magic priority="50"><match type="string" value="AC10" offset="0"/></magic>
     <glob pattern="*.dwg"/>
   </mime-type>

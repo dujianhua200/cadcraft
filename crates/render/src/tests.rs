@@ -297,6 +297,27 @@ fn truetype_text_is_filled_or_outlined() {
     assert!(l.prims.len() >= 3, "O has two contours, H one");
 }
 
+/// Far-away text (a drawing viewed whole, thousands of small glyphs) degrades to one box
+/// per glyph instead of triangulating every outline, while keeping the same footprint: the
+/// text stays visible at its place instead of vanishing or costing full detail.
+#[test]
+fn tiny_truetype_text_degrades_to_boxes() {
+    let Some(font) = system_font() else { return };
+    let d = text_doc(font, "OH OH OH OH OH");
+    let full = build(&d, &Space::Model, &Options::default());
+    let far = build(&d, &Space::Model, &Options { min_dash: 100.0, ..Default::default() });
+    assert!(!full.tris.is_empty() && !far.tris.is_empty(), "both draw the text");
+    assert!(far.tris.len() * 4 < full.tris.len(), "far view must collapse glyphs to boxes: full {} far {}", full.tris.len(), far.tris.len());
+    for (a, b) in [
+        (full.bounds.min.x, far.bounds.min.x),
+        (full.bounds.min.y, far.bounds.min.y),
+        (full.bounds.max.x, far.bounds.max.x),
+        (full.bounds.max.y, far.bounds.max.y),
+    ] {
+        assert!((a - b).abs() < 0.05, "the boxes keep the glyphs' footprint: full {full:?} far {far:?}");
+    }
+}
+
 #[test]
 fn missing_font_falls_back_to_stroke() {
     let d = text_doc("NoSuchFontAnywhere.ttf", "OH");
@@ -923,4 +944,269 @@ fn cancelled_build_stops_early() {
     let drawing = cadcraft_doc::Drawing::new_imperial();
     assert!(!crate::hatch::pattern_lines_until(&drawing, &h, &loops, 0.0, None, None).is_empty());
     assert!(crate::hatch::pattern_lines_until(&drawing, &h, &loops, 0.0, None, set.as_deref()).is_empty());
+}
+
+#[test]
+fn ole_frame_renders_placeholder_rectangle() {
+    use cadcraft_doc::{OleFrame, Unknown};
+    let mut d = Drawing::new_imperial();
+    d.add(
+        &Space::Model,
+        Common::default(),
+        EntityKind::Unknown(Unknown {
+            dxf_type: "OLE2FRAME".into(),
+            tags: vec![],
+            ole: Some(OleFrame {
+                upper_left: Vec3::new(10.0, 20.0, 0.0),
+                lower_right: Vec3::new(30.0, 5.0, 0.0),
+                source_app: String::new(),
+                object_type: 2,
+                preview: None,
+            }),
+        }),
+    )
+    .unwrap();
+    let l = build(&d, &Space::Model, &Options::default());
+    // Rectangle + both diagonals: six polylines (plus label strokes when the font
+    // covers the label's characters), and the list bounds cover the frame.
+    assert!(l.prims.len() >= 6, "prims: {}", l.prims.len());
+    assert!(l.bounds.min.x <= 10.0 && l.bounds.min.y <= 5.0);
+    assert!(l.bounds.max.x >= 30.0 && l.bounds.max.y >= 20.0);
+    // A plain unknown still draws nothing.
+    let mut d2 = Drawing::new_imperial();
+    d2.add(&Space::Model, Common::default(), EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None })).unwrap();
+    assert!(build(&d2, &Space::Model, &Options::default()).prims.is_empty());
+}
+
+/// A text-only EMF: one EXTTEXTOUTW "Hi" run, no strokes or fills. Built by hand (the
+/// same record layout the parser expects) so this test does not depend on test-only
+/// helpers in `emf.rs`.
+fn text_only_emf_hex() -> String {
+    fn u32b(v: u32) -> [u8; 4] {
+        v.to_le_bytes()
+    }
+    fn i32b(v: i32) -> [u8; 4] {
+        v.to_le_bytes()
+    }
+    fn point(x: i32, y: i32) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&i32b(x));
+        v.extend_from_slice(&i32b(y));
+        v
+    }
+    fn rect(x0: i32, y0: i32, x1: i32, y1: i32) -> Vec<u8> {
+        let mut v = point(x0, y0);
+        v.extend_from_slice(&point(x1, y1));
+        v
+    }
+    fn rec(ty: u32, body: &[u8]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&u32b(ty));
+        v.extend_from_slice(&u32b(8 + body.len() as u32));
+        v.extend_from_slice(body);
+        v
+    }
+    let mut records = Vec::new();
+    // ENHMETAHEADER (108 bytes): bounds (0,0)-(200,100), " EMF", 96 DPI.
+    let mut h = Vec::new();
+    h.extend_from_slice(&u32b(1));
+    h.extend_from_slice(&u32b(108));
+    h.extend_from_slice(&rect(0, 0, 200, 100));
+    h.extend_from_slice(&rect(0, 0, 20000, 10000));
+    h.extend_from_slice(b" EMF");
+    h.extend_from_slice(&u32b(0x0001_0000));
+    h.extend_from_slice(&u32b(0)); // nBytes, patched below
+    h.extend_from_slice(&u32b(7)); // nRecords
+    h.extend_from_slice(&[16, 0, 0, 0]); // nHandles 16, sReserved 0
+    h.extend_from_slice(&u32b(0)); // nDescription
+    h.extend_from_slice(&u32b(0)); // offDescription
+    h.extend_from_slice(&u32b(0)); // nPalEntries
+    h.extend_from_slice(&u32b(960)); // szlDevice.x
+    h.extend_from_slice(&u32b(960)); // szlDevice.y
+    h.extend_from_slice(&u32b(254)); // szlMillimeters.x
+    h.extend_from_slice(&u32b(254)); // szlMillimeters.y
+    h.extend_from_slice(&[0; 16]); // cbPixelFormat..szlMicrometers
+    records.extend_from_slice(&h);
+    // EXTCREATEFONTINDIRECTW: ihFont 3, lfHeight -20, empty face.
+    let mut f = Vec::new();
+    f.extend_from_slice(&u32b(3));
+    f.extend_from_slice(&i32b(-20)); // lfHeight
+    f.extend_from_slice(&i32b(0)); // lfWidth
+    f.extend_from_slice(&i32b(0)); // lfEscapement
+    f.extend_from_slice(&i32b(0)); // lfOrientation
+    f.extend_from_slice(&i32b(400)); // lfWeight
+    f.extend_from_slice(&[0; 8]); // italic..pitchAndFamily
+    f.extend_from_slice(&[0; 64]); // lfFaceName (empty -> stroke font)
+    records.extend_from_slice(&rec(82, &f));
+    records.extend_from_slice(&rec(37, &u32b(3))); // SELECTOBJECT font
+    records.extend_from_slice(&rec(24, &u32b(0))); // SETTEXTCOLOR black
+    records.extend_from_slice(&rec(22, &u32b(0))); // SETTEXTALIGN left/top
+    // EXTTEXTOUTW "Hi" at (20, 70).
+    let mut t = Vec::new();
+    t.extend_from_slice(&rect(20, 70, 60, 90)); // rclBounds
+    t.extend_from_slice(&u32b(0)); // iGraphicsMode
+    t.extend_from_slice(&1.0f32.to_le_bytes()); // exScale
+    t.extend_from_slice(&1.0f32.to_le_bytes()); // eyScale
+    t.extend_from_slice(&point(20, 70)); // ptlReference
+    t.extend_from_slice(&u32b(2)); // nChars
+    t.extend_from_slice(&u32b(76)); // offString
+    t.extend_from_slice(&u32b(0)); // fOptions
+    t.extend_from_slice(&rect(20, 70, 60, 90)); // rcl
+    t.extend_from_slice(&u32b(0)); // offDx
+    t.extend_from_slice(&[0x48, 0x00, 0x69, 0x00]); // "Hi" UTF-16LE
+    records.extend_from_slice(&rec(84, &t));
+    records.extend_from_slice(&rec(14, &[0; 8])); // EOF
+    let total = records.len() as u32;
+    records[48..52].copy_from_slice(&u32b(total)); // nBytes
+    records.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[test]
+fn ole_emf_text_follows_text_option() {
+    use cadcraft_doc::{OleFrame, RawTag, Unknown};
+    let frame = |tags: Vec<RawTag>| {
+        let mut d = Drawing::new_imperial();
+        d.add(
+            &Space::Model,
+            Common::default(),
+            EntityKind::Unknown(Unknown {
+                dxf_type: "OLE2FRAME".into(),
+                tags,
+                ole: Some(OleFrame {
+                    upper_left: Vec3::new(0.0, 100.0, 0.0),
+                    lower_right: Vec3::new(200.0, 0.0, 0.0),
+                    source_app: "test".into(),
+                    object_type: 2,
+                    preview: None,
+                }),
+            }),
+        )
+        .unwrap();
+        d
+    };
+    // No preview: the frame alone (rectangle + both diagonals).
+    let baseline = build(&frame(vec![]), &Space::Model, &Options { text: false, ..Default::default() }).prims.len();
+    assert_eq!(baseline, 6, "frame prims: {baseline}");
+    let tags = vec![RawTag { code: 310, value: text_only_emf_hex() }];
+    // Text off: a text-only preview falls back to the frame (no white background, no text).
+    let off = build(&frame(tags.clone()), &Space::Model, &Options { text: false, ..Default::default() });
+    assert_eq!(off.prims.len(), baseline, "text-off OLE should draw only its frame");
+    // Text on: the preview draws (white background + the text run); the placeholder
+    // label is skipped because the preview drew.
+    let on = build(&frame(tags), &Space::Model, &Options::default());
+    assert!(on.prims.len() > baseline, "text-on OLE should draw its preview, got {} vs baseline {baseline}", on.prims.len());
+}
+
+/// Tile quads (§9): placement + decode + blank placeholder + raster pixels.
+fn red_png() -> Vec<u8> {
+    let mut pm = tiny_skia::Pixmap::new(4, 4).unwrap_or_else(|| tiny_skia::Pixmap::new(1, 1).unwrap_or_else(|| panic!("pixmap")));
+    pm.fill(tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    pm.encode_png().unwrap_or_default()
+}
+
+#[test]
+fn tile_image_decode_roundtrip() {
+    let img = TileImage::decode_png(&red_png()).unwrap_or_else(|| panic!("decode red png"));
+    assert_eq!((img.width, img.height), (4, 4));
+    assert_eq!(&img.rgba[0..4], &[255, 0, 0, 255]);
+    // Garbage is a blank placeholder, never a panic.
+    assert!(TileImage::decode_png(b"not a png").is_none());
+    assert!(TileImage::decode_png(&[]).is_none());
+    assert!(TileImage::from_rgba(2, 2, vec![0u8; 15]).is_none());
+    // Premultiply round-trips opaque red exactly.
+    assert_eq!(&img.premultiplied()[0..4], &[255, 0, 0, 255]);
+}
+
+#[test]
+fn tile_quads_from_cache_loader() {
+    use cadcraft_doc::gis::{GeoRef, TileLayer};
+    let layer = TileLayer::default_osm();
+    let georef = GeoRef::centred(32.1301, 114.0814);
+    let lo = georef.project(114.07, 32.12).unwrap_or(Vec2::ZERO);
+    let hi = georef.project(114.09, 32.14).unwrap_or(Vec2::ZERO);
+    // Only the first tile is "in cache"; the rest are misses → blank placeholders.
+    let seen = std::cell::Cell::new(0usize);
+    let quads = build_tile_quads(&layer, &georef, lo, hi, Some(14), &|t| {
+        seen.set(seen.get() + 1);
+        if t.x == 0 && t.y == 0 { Some(red_png()) } else { None }
+    });
+    assert!(!quads.is_empty(), "a small view at z14 needs tiles");
+    assert!(quads.iter().all(|q| q.tile.z == 14));
+    assert!(quads.iter().all(|q| q.corners.iter().all(|c| c.is_finite())));
+    assert!(quads.iter().all(|q| (q.opacity - 0.85).abs() < 1e-12));
+    assert_eq!(seen.get(), quads.len(), "every tile goes through the loader exactly once");
+    // A loader that always fails still yields quads (all blank), never an error.
+    let blank = build_tile_quads(&layer, &georef, lo, hi, Some(14), &|_| None);
+    assert_eq!(blank.len(), quads.len());
+    assert!(blank.iter().all(|q| q.image.is_none()));
+    // A requested zoom above the layer cap is served from the cap (z≤19), never above.
+    let capped = build_tile_quads(&layer, &georef, lo, hi, Some(25), &|_| None);
+    assert!(capped.iter().all(|q| q.tile.z <= 19));
+}
+
+#[test]
+fn raster_draws_tile_pixels_under_vectors() {
+    use cadcraft_doc::gis::TileRef;
+    // One opaque red quad exactly covering the view: the centre pixel must be red.
+    let mut list = DisplayList::default();
+    let img = TileImage::decode_png(&red_png()).unwrap_or_else(|| panic!("decode"));
+    list.tiles.push(TileQuad {
+        tile: TileRef { z: 0, x: 0, y: 0, url: String::new(), cache_key: "0/0/0.png".into() },
+        corners: [Vec2::new(-10.0, 10.0), Vec2::new(10.0, 10.0), Vec2::new(10.0, -10.0), Vec2::new(-10.0, -10.0)],
+        opacity: 1.0,
+        image: Some(img),
+    });
+    let view = View { center: Vec2::ZERO, scale: 10.0, width: 200, height: 200 };
+    let pm = render(&list, &view, &RasterOptions::default()).unwrap_or_else(|| panic!("render"));
+    let px = pm.pixel(100, 100).unwrap_or_else(|| panic!("centre pixel"));
+    assert!(px.red() > 200 && px.green() < 50 && px.blue() < 50, "centre pixel: {:?}", (px.red(), px.green(), px.blue()));
+    // A placeholder quad (no image) renders the background, never a crash.
+    let mut blank = DisplayList::default();
+    blank.tiles.push(TileQuad {
+        tile: TileRef { z: 0, x: 0, y: 0, url: String::new(), cache_key: "0/0/0.png".into() },
+        corners: [Vec2::new(-10.0, 10.0), Vec2::new(10.0, 10.0), Vec2::new(10.0, -10.0), Vec2::new(-10.0, -10.0)],
+        opacity: 1.0,
+        image: None,
+    });
+    let pm = render(&blank, &view, &RasterOptions::default()).unwrap_or_else(|| panic!("render blank"));
+    let px = pm.pixel(100, 100).unwrap_or_else(|| panic!("centre pixel"));
+    assert_eq!((px.red(), px.green(), px.blue()), (33, 40, 48), "placeholder leaves the background");
+    // Zero opacity draws nothing either.
+    let mut transparent = DisplayList::default();
+    let img = TileImage::decode_png(&red_png()).unwrap_or_else(|| panic!("decode"));
+    transparent.tiles.push(TileQuad {
+        tile: TileRef { z: 0, x: 0, y: 0, url: String::new(), cache_key: "0/0/0.png".into() },
+        corners: [Vec2::new(-10.0, 10.0), Vec2::new(10.0, 10.0), Vec2::new(10.0, -10.0), Vec2::new(-10.0, -10.0)],
+        opacity: 0.0,
+        image: Some(img),
+    });
+    let pm = render(&transparent, &view, &RasterOptions::default()).unwrap_or_else(|| panic!("render transparent"));
+    let px = pm.pixel(100, 100).unwrap_or_else(|| panic!("centre pixel"));
+    assert_eq!((px.red(), px.green(), px.blue()), (33, 40, 48));
+}
+
+#[test]
+fn attribution_text_list_shapes_text() {
+    // The attribution line becomes vector text at the requested spot.
+    let opts = Options { tolerance: 0.01, ..Options::default() };
+    let list = crate::attribution::attribution_text_list("(c) OpenStreetMap contributors", Vec2::new(10.0, 20.0), 2.0, &opts);
+    assert!(!list.prims.is_empty(), "the attribution has primitives");
+    // Vector text: stroke polylines with the drafting (SHX) font, or filled
+    // outlines with an outline font — either way it is geometry, not a bitmap.
+    assert!(list.prims.iter().any(|p| matches!(p.kind, Kind::Polyline | Kind::Tris)), "the attribution is vector text");
+    let b = list.bounds;
+    // Left edge at the corner; descenders (the 'p's) dip below the baseline.
+    assert!(b.min.x >= 10.0 - 1e-6 && b.min.y >= 20.0 - 2.0 - 1e-6, "the text starts at its corner, bounds {b:?}");
+    assert!(b.max.y <= 20.0 + 2.0 + 1e-6, "the text fits its height, bounds {b:?}");
+    // Empty text / bad size: no primitives, never a crash.
+    assert!(crate::attribution::attribution_text_list("", Vec2::ZERO, 2.0, &opts).prims.is_empty());
+    assert!(crate::attribution::attribution_text_list("x", Vec2::ZERO, 0.0, &opts).prims.is_empty());
+    // Appending merges: the base list keeps its prims, the attribution lands after them.
+    let mut base = DisplayList::default();
+    base.prims.push(DPrim { handle: Handle(1), color: Rgb(0, 0, 0), aci7: false, lw: 0.0, transparency: 0, kind: Kind::Point, start: 0, len: 1 });
+    base.verts.push(Vec2::ZERO);
+    let n = base.prims.len();
+    crate::append_list(&mut base, list);
+    assert!(base.prims.len() > n);
+    assert!(matches!(base.prims[n].kind, Kind::Polyline | Kind::Tris), "the attribution's first primitive is vector text");
 }

@@ -7,8 +7,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod attribution;
 pub mod clip;
 mod dim;
+mod emf;
 mod fill;
 mod hatch;
 mod linetype;
@@ -21,6 +23,7 @@ mod plotstyle;
 mod point;
 pub mod raster;
 mod text;
+pub mod tiles;
 mod tolerance;
 pub mod units;
 mod wide;
@@ -34,6 +37,7 @@ pub use dim::{ArrowGeom, Arrowhead, DimGeometry, DimText, LineRole, arrowhead, d
 pub use fill::triangulate_evenodd;
 pub use hatch::{fill_loops as hatch_fill_loops, pattern_swatch};
 pub use paper::{PAPER_SIZES, PaperSize, Sheet, paper_size, sheet};
+pub use tiles::{TileImage, TileQuad, build_tile_quads};
 pub use tolerance::{gdt_points, tolerance_in};
 
 /// Handle carried by model-space geometry drawn inside a paper-space viewport (it belongs to no
@@ -95,6 +99,10 @@ pub struct DisplayList {
     pub sheet: Option<Sheet>,
     /// Block contents expanded while building (see [`MAX_BLOCK_EXPANSION`]).
     pub expanded: usize,
+    /// Basemap tile quads under the vector primitives (empty when no tile
+    /// layer is active; see [`tiles::build_tile_quads`]). Drawn first, so
+    /// vectors stay on top of the tiles.
+    pub tiles: Vec<TileQuad>,
     /// Plot style end, join and fill style per primitive (parallel to `prims`; missing entries
     /// are "use object"), turned into geometry by [`pen::apply`].
     pub pens: Vec<Pen>,
@@ -573,7 +581,11 @@ fn build_parallel(b: &mut Builder, d: &Drawing, store: &cadcraft_doc::EntityStor
 }
 
 /// Append `src` to `dst`: its primitives index into `dst`'s vertex and triangle arrays.
-#[cfg(not(target_arch = "wasm32"))]
+pub fn append_list(dst: &mut DisplayList, src: DisplayList) {
+    append(dst, src);
+}
+
+/// Append `src` to `dst`: its primitives index into `dst`'s vertex and triangle arrays.
 fn append(dst: &mut DisplayList, src: DisplayList) {
     let (verts, tris, prims) = (dst.verts.len() as u32, dst.tris.len() as u32, dst.prims.len() as u32);
     // Pens are parallel to the primitives, with missing entries meaning "use object".
@@ -1275,6 +1287,48 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                         let tris = fill::triangulate_evenodd(&[pts]);
                         b.tris(ctx, rgb, &tris);
                     }
+                }
+            }
+            // An OLE2FRAME with an EMF preview draws the preview as vector geometry
+            // over the frame; when it drew anything, the placeholder label is skipped.
+            let mut ole_drew = false;
+            if let EntityKind::Unknown(u) = kind
+                && let Some(o) = u.ole.as_ref().filter(|o| o.is_visible())
+            {
+                ole_drew = crate::emf::draw_ole_emf(b, ctx, &u.tags, o);
+            }
+            // An OLE2FRAME's placeholder gets a centred label inside its frame (its prims
+            // above already drew the rectangle + diagonals). The label scales with the frame
+            // like any other text; no OLE activation happens (that needs COM / the source
+            // application, which CADCraft does not embed).
+            if b.opts.text
+                && !ole_drew
+                && let EntityKind::Unknown(u) = kind
+                && let Some(o) = u.ole.as_ref().filter(|o| o.is_visible())
+            {
+                let c = o.corners();
+                let w = (c[1].x - c[0].x).abs();
+                let h = (c[0].y - c[2].y).abs();
+                let label = o.label();
+                let chars = label.chars().count().max(1) as f64;
+                // A CJK character is about one em wide; keep the label inside the frame.
+                let height = (h * 0.3).min(w / (chars * 1.05));
+                if height.is_finite() && height > 0.0 {
+                    let centre = Vec2::new((c[0].x + c[1].x) / 2.0, (c[0].y + c[2].y) / 2.0);
+                    let text = cadcraft_doc::Text {
+                        insert: centre.to3(0.0),
+                        align_pt: Some(centre.to3(0.0)),
+                        height,
+                        value: label,
+                        rotation: 0.0,
+                        width_factor: 1.0,
+                        oblique: 0.0,
+                        style: "Standard".to_string(),
+                        halign: cadcraft_doc::HAlign::Center,
+                        valign: cadcraft_doc::VAlign::Middle,
+                    };
+                    let (sh, _) = place_text_entity(ctx.d, &text, &text.value);
+                    b.shaped(ctx, rgb, lw, &sh);
                 }
             }
         }

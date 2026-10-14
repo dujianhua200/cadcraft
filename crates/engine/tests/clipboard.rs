@@ -176,6 +176,7 @@ static WRITTEN: Mutex<Option<Drawing>> = Mutex::new(None);
 #[test]
 fn clipboard_travels_as_text() {
     set_io(IoHooks {
+        read_progress: None,
         read: |bytes, _| {
             if bytes.starts_with(b"0\nSECTION") {
                 WRITTEN.lock().unwrap().clone().ok_or_else(|| "nothing written".into())

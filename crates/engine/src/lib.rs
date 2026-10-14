@@ -12,6 +12,7 @@ pub mod assoc;
 pub mod audit;
 pub mod autosave;
 pub mod blockedit;
+pub mod bridge;
 pub mod cmd;
 mod finite;
 pub mod grip_dims;
@@ -27,6 +28,8 @@ pub mod select;
 pub mod snap;
 pub mod spatial;
 pub mod sysvars;
+pub mod tilefetch;
+pub mod tilemap;
 pub mod undoctl;
 pub mod units;
 
@@ -1317,6 +1320,14 @@ impl Session {
     /// transparent command, cancels it and the command it interrupted.
     pub fn cancel(&mut self) {
         self.point_mods.clear();
+        // Esc with a dialog open dismisses the dialog (done_dialog 0) and lets the
+        // routine continue; aborting here would kill a routine that only waits for
+        // its dialog to close. This mirrors `lisp_input`'s Cancel arm.
+        if self.lisp_waiting_on_dialog() {
+            self.echo("*Cancel*");
+            self.lisp_dialog_finish(0);
+            return;
+        }
         // Esc stops a LISP routine waiting for input, and the command it paused in.
         if self.lisp_waiting() {
             if self.running.is_some() {

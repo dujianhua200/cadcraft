@@ -7,6 +7,8 @@ use serde_json::json;
 
 fn app_with_blocks() -> CadApp {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // These tests assert English dialog text; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     for (name, y) in [("Window", 0.0), ("door", 5.0)] {
         let l = app.run("line", json!({ "points": [[0, y], [2, y]] })).unwrap()["handles"][0].clone();
         app.run("block", json!({ "name": name, "base": [0, y], "handles": [l], "description": format!("{name} symbol") })).unwrap();
@@ -127,12 +129,14 @@ fn read(bytes: &[u8], _name: &str) -> Result<cadcraft_engine::doc::Drawing, Stri
 #[test]
 fn opening_a_drawing_with_authoring_elements_offers_the_block_editor() {
     use cadcraft_engine::cmd::file::{IoHooks, set_io};
-    set_io(IoHooks { read, write: |_, _| Ok(Vec::new()), plot: None });
+    set_io(IoHooks { read_progress: None, read, write: |_, _| Ok(Vec::new()), plot: None });
     let dir = std::env::temp_dir().join(format!("cadcraft-authoring-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let symbol = dir.join("Symbol.dxf");
     std::fs::write(&symbol, "authoring").unwrap();
     let mut app = CadApp::new(Session::new(), Services::default());
+    // This test asserts English dialog text; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.open_path(&symbol.to_string_lossy());
     // The file is read in the background (#797): wait for it to be added.
     let t = std::time::Instant::now();

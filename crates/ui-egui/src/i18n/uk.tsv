@@ -87,6 +87,8 @@
 	Axis, End	Вісь, кінець
 	Base	База
 	Baseline	Базовий
+	Basemap	Базова карта
+	Basemap data	Дані базової карти
 	Batch Publish	Пакетне публікування
 	Binary assets added	Додані двійкові ресурси
 	Binary assets removed	Видалені двійкові ресурси
@@ -179,6 +181,7 @@
 	Copy Nested Objects	Копіювати вкладені об'єкти
 	Copy Selection	Копіювати вибране
 	Copy with Base Point	Копіювати з базовою точкою
+	Copyright	Авторські права
 	Count	Кількість
 	Count List	Список підрахунку
 	Count Table	Таблиця підрахунку
@@ -253,6 +256,9 @@
 	Drawing Template (DWT)	Шаблон креслення (DWT)
 	Drawing Utilities	Утиліти креслення
 	Drawings (DWG, DXF)	Креслення (DWG, DXF)
+	OpenStreetMap copyright	Авторські права OpenStreetMap
+	Pull from OviMap…	Отримати з OviMap…
+	Push to OviMap…	Надіслати до OviMap…
 	SVG drawings (SVG, SVGZ)	Креслення SVG (SVG, SVGZ)
 	Dynamic	Динамічно
 	Dynamic Dimensions	Динамічні розміри
@@ -990,6 +996,7 @@
 	Snap, grid, polar tracking and Dynamic Input:	Крок, сітка, полярне відстеження та динамічне введення:
 	Tables	Таблиці
 	The aperture is how near the cursor must come to a point for an object snap to find it.	Апертура — це наскільки близько курсор має підійти до точки, щоб об'єктна прив'язка її знайшла.
+	The object is outside the reference-edit working set and cannot be edited.	Об'єкт поза робочим набором редагування посилання, його не можна редагувати.
 	User Preferences	Налаштування користувача
 	Visual Effect Settings	Параметри візуальних ефектів
 	Visual Effect Settings...	Параметри візуальних ефектів...
@@ -1107,6 +1114,8 @@
 	Text	Текст
 	Text Editor	Текстовий редактор
 	Text Height	Висота тексту
+	Text inside a block cannot be edited here. Enter the block editor to edit it.	Текст усередині блока тут не можна редагувати. Увійдіть у редактор блока, щоб відредагувати його.
+	Text on a locked layer cannot be edited. Unlock the layer first.	Текст на заблокованому шарі не можна редагувати. Спочатку розблокуйте шар.
 	Text Style...	Текстовий стиль...
 	Text height	Висота тексту
 	Text override	Перевизначення тексту
@@ -1330,3 +1339,15 @@
 	Justify	За шириною
 	Text color	Колір тексту
 	Click the ruler to add a tab stop, right-click to remove one	Натисніть на лінійку, щоб додати табуляцію; права кнопка видаляє її
+# OviMap link + tilemap commands (docs/ovimap-link.md §7.2, §9).
+	Assign OviMap Identity	Призначити ідентифікатор OviMap
+	Export OviMap…	Експортувати OviMap…
+	Import OviMap GeoJSON…	Імпортувати OviMap GeoJSON…
+	Inspect Link…	Переглянути зв'язок…
+	Inspect OviMap Link…	Переглянути зв'язок OviMap…
+	OviMap	OviMap
+	OviMap GeoJSON…	OviMap GeoJSON…
+	OviMap…	OviMap…
+	Set Georef…	Встановити геоприв'язку…
+	Set OviMap Georef…	Встановити геоприв'язку OviMap…
+	Tilemap…	Підкладка з тайлів…

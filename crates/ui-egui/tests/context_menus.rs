@@ -33,7 +33,10 @@ fn ids(groups: &[Vec<Entry>]) -> Vec<String> {
 }
 
 fn app() -> CadApp {
-    CadApp::new(Session::new(), Services::default())
+    let mut app = CadApp::new(Session::new(), Services::default());
+    // One test asserts English painted menu text; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
+    app
 }
 
 /// Select everything in model space.

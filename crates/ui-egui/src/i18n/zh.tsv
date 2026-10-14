@@ -61,6 +61,8 @@
 	Axis, End	轴端点
 	Base	基准
 	Baseline	基线
+	Basemap	底图
+	Basemap data	底图数据
 	Batch Publish	批量发布
 	Binary assets added	已添加二进制资产
 	Binary assets removed	已移除二进制资产
@@ -137,6 +139,7 @@
 	Copy Nested Objects	复制嵌套对象
 	Copy Selection	复制所选对象
 	Copy with Base Point	带基点复制
+	Copyright	版权
 	Count	计数
 	Create Block	创建块
 	Creates a user parameter	创建一个用户参数
@@ -491,6 +494,7 @@
 	Open Sample Drawing	打开示例图形
 	Open sample drawing	打开示例图形
 	Open...	打开...
+	OpenStreetMap copyright	OpenStreetMap 版权
 	Operator:	运算符:
 	Orbit	三维动态观察
 	Ordinate	坐标标注
@@ -534,6 +538,8 @@
 	New CTB	新 CTB
 	New STB	新 STB
 	New style	新样式
+	Pull from OviMap…	从 OviMap 拉取…
+	Push to OviMap…	推送到 OviMap…
 	Reset Panel Layout	重置面板布局
 	Use for this layout	用于此布局
 	Display plot styles	显示打印样式
@@ -908,6 +914,8 @@
 	Text	文字
 	Text Editor	文字编辑器
 	Text Height	文字高度
+	Text inside a block cannot be edited here. Enter the block editor to edit it.	块内文字不能在此编辑，请进入块编辑后再编辑。
+	Text on a locked layer cannot be edited. Unlock the layer first.	文字所在图层已锁定，无法编辑。请先解锁图层。
 	Text Style...	文字样式...
 	Text height	文字高度
 	Text override	文字替代
@@ -1089,6 +1097,7 @@
 	Object snap marker size	对象捕捉标记大小
 	Object snap aperture	对象捕捉靶框大小
 	The aperture is how near the cursor must come to a point for an object snap to find it.	靶框决定了光标必须离对象捕捉点多近才能被识别。
+	The object is outside the reference-edit working set and cannot be edited.	该对象不在参照编辑工作集内，无法编辑。
 	Snap, grid, polar tracking and Dynamic Input:	捕捉、栅格、极轴追踪和动态输入:
 	Pickbox size	拾取框大小
 	Grip size	夹点大小
@@ -1116,3 +1125,239 @@
 	Polar angle measurement	极轴角测量
 	Relative to last segment	相对于上一线段
 	Show command prompting near the crosshairs	在光标附近显示命令提示
+# Full coverage: the rows below close every gap against the English key set (the union of
+# all catalogs). Translations are original Simplified Chinese written from CADCraft's English
+# strings; product/format names (CADCraft, DWG, DXF, DWT, SVG, PDF, LISP) and code tokens
+# (B, X, Y, NAME$0$LAYER) stay unchanged.
+	A variable name starts with a letter and has only letters, digits and _	变量名以字母开头，且仅包含字母、数字和下划线
+	Add Vertex	添加顶点
+	Add: Pick points	添加：拾取点
+	Add: Select objects	添加：选择对象
+	Align Multileaders	对齐多重引线
+	Annotative Update	更新注释性对象
+	Apply	应用
+	Associative	关联
+	Attach DWG...	附着 DWG...
+	B	B
+	Bind	绑定
+	Block to create or edit	要创建或编辑的块
+	Bottom left	左下
+	Bottom right	右下
+	Boundaries	边界
+	Boundaries picked: {n}	已拾取边界：{n}
+	Bulleted list	项目符号列表
+	CADCraft	CADCraft
+	Centered	居中
+	Changed: {n}	已更改：{n}
+	Clear Command History	清除命令历史
+	Clear History	清除历史记录
+	Clear Recent Files	清除最近使用的文件
+	Click the ruler to add a tab stop, right-click to remove one	单击标尺添加制表位，右键单击删除制表位
+	Click to set new origin	单击设置新原点
+	Clip Viewport	裁剪视口
+	Close All Other Drawings	关闭其他所有图形
+	Close Array Editing	关闭阵列编辑
+	Close Block Editor	关闭块编辑器
+	Close Comparison	关闭比较
+	Collect	收集
+	Collect Multileaders	收集多重引线
+	Color 1	颜色 1
+	Color 2	颜色 2
+	Command Aliases	命令别名
+	Convert	换算
+	Convert to Arc	转换为圆弧
+	Convert to Line	转换为直线
+	Copy Full File Path	复制完整文件路径
+	Copy History	复制历史记录
+	Count List	计数列表
+	Count Table	计数表
+	Create separate hatches	创建独立的图案填充
+	Crossing selection color:	窗交选择颜色：
+	Curved	弯曲
+	Custom	自定义
+	Default Save Version	默认保存版本
+	Default to boundary extents	默认使用边界范围
+	Degrees of Freedom	自由度
+	Degrees of freedom: {n}	自由度：{n}
+	Detach	拆离
+	Dimension Edit	编辑标注
+	Drag Dynamic Grip	拖动动态夹点
+	Drawing Recovery Manager...	图形恢复管理器...
+	Drawing Template (DWT)	图形样板 (DWT)
+	Dynamic Block Data	动态块数据
+	Dynamic Block Grips	动态块夹点
+	Dynamic Block Reference	动态块参照
+	Edit Array	编辑阵列
+	Edit Attributes...	编辑属性...
+	Edit Block Definition	编辑块定义
+	Edit Multileader	编辑多重引线
+	Edit Table Cell	编辑表格单元格
+	Enter	回车
+	Evaluate	求值
+	Evaluate LISP	执行 LISP
+	Exclude:	排除：
+	Export Table	导出表格
+	External References	外部参照
+	From Template...	来自样板...
+	Get from the Drawing	从图形中获取
+	Grip Edit	夹点编辑
+	Grip Option	夹点选项
+	Grips	夹点
+	Group Options	编组选项
+	Group Selection	编组选择
+	Groups	编组
+	Hatch Pattern	填充图案
+	Hatch Patterns	填充图案
+	Hatch Pick	拾取填充
+	Hatch and Gradient	图案填充和渐变色
+	Hatch origin	图案填充原点
+	Hatches	图案填充
+	Hemispherical	半球面
+	Hide Palette	隐藏选项板
+	History	历史记录
+	Ignore	忽略
+	Indicate selection area	指示选择区域
+	Infer Constraints	推断约束
+	Insert Table Formula	插入表格公式
+	Insert tab	插入制表符
+	Interface language	界面语言
+	Inverted	反转
+	Island detection	孤岛检测
+	Isometric Plane	等轴测平面
+	Italic	斜体
+	Justify	两端对齐
+	Lines of Command History	命令历史行数
+	Load Application...	加载应用程序...
+	Loaded	已加载
+	Lock viewport	锁定视口
+	Make it a block of this drawing, keeping its layer names	将其作为本图形的块，保留其图层名
+	Make it a block of this drawing; its layers become NAME$0$LAYER	将其作为本图形的块；其图层将变为 NAME$0$LAYER
+	More toolbar commands	更多工具栏命令
+	Multiline text	多行文字
+	Named Views...	命名视图...
+	New block	新块
+	Next Change	下一处更改
+	No external references are attached.	未附着任何外部参照。
+	Normal	常规
+	Not Found	未找到
+	Not loaded	未加载
+	Numbered list	编号列表
+	Object grouping	对象编组
+	Object selection limit for display of grips	显示夹点的对象选择上限
+	Objects on locked layers	锁定图层上的对象
+	Only in this drawing: {n}	仅在本图形中：{n}
+	Only in {name}: {n}	仅在 {name} 中：{n}
+	Open	打开
+	Open Recent	打开最近使用的文件
+	Open in Block Editor	在块编辑器中打开
+	Origin: {x}, {y}	原点：{x}, {y}
+	Outer	仅外部
+	Over-constrained	过约束
+	Overlay	覆盖
+	Overline	上划线
+	Paste to Command Line	粘贴到命令行
+	Plot Window	打印窗口
+	Plotter Manager	绘图仪管理器
+	Polygonal Viewport	多边形视口
+	Polyline Edit	编辑多段线
+	Preview	预览
+	Previous Change	上一处更改
+	Query Texts	查询文字
+	QuickCalc Pick	快速计算拾取
+	Recalculate Table Formulas	重新计算表格公式
+	Recent Commands	最近使用的命令
+	Recent Input	最近的输入
+	Reference Name	参照名
+	References: {n}	参照：{n}
+	Reinitialize	重新初始化
+	Reload	重新加载
+	Reload All	全部重新加载
+	Remove Vertex	删除顶点
+	SVG drawings (SVG, SVGZ)	SVG 图形 (SVG, SVGZ)
+	Save Block	保存块
+	Save Block As	块另存为
+	Saved Path	已保存的路径
+	Search for pattern	搜索图案
+	Select Similar	选择类似对象
+	Selection Area Effect	选择区域效果
+	Selection Preview Filter	选择预览筛选器
+	Selection area opacity:	选择区域不透明度：
+	Selection effect color	选择效果颜色
+	Selection modes	选择模式
+	Selection preview	选择预览
+	Set Current Viewport	设置当前视口
+	Set Dynamic Property	设置动态特性
+	Set Table Cell Style	设置表格单元格样式
+	Settings...	设置...
+	Shape	形状
+	Sheet Books to PDF...	图纸集发布为 PDF...
+	Show and hide the tools of this category	显示或隐藏此类别的工具
+	Show grips	显示夹点
+	Show in Tool Sets	在工具集中显示
+	Snap Overrides	捕捉替代
+	Specified origin	指定原点
+	Spherical	球面
+	Spline Edit	编辑样条曲线
+	Stretch Vertex	拉伸顶点
+	Table Breaks	表格分段
+	Table Cell Style	表格单元格样式
+	Tables	表格
+	Temporary track point	临时追踪点
+	Text color	文字颜色
+	Thaw Layer	解冻图层
+	This drawing	本图形
+	To	到
+	Top left	左上
+	Top right	右上
+	Turn On Layer	打开图层
+	Underline	下划线
+	Units Conversion	单位换算
+	Unload	卸载
+	Unloaded	已卸载
+	Unlock viewport	解锁视口
+	Unreferenced	未参照
+	Unresolved	未解析
+	Unsaved changes	未保存的更改
+	Update Data Links	更新数据链接
+	Use current origin	使用当前原点
+	Variables	变量
+	Version 2000	版本 2000
+	Version 2004	版本 2004
+	Version 2007	版本 2007
+	Version 2010	版本 2010
+	Version 2013	版本 2013
+	Version 2018	版本 2018
+	Viewport is locked	视口已锁定
+	Viewport scale	视口比例
+	Visual Effect Settings	视觉效果设置
+	Visual Effect Settings...	视觉效果设置...
+	Volume	体积
+	When a command is active	当命令处于活动状态时
+	When no command is active	当没有命令处于活动状态时
+	Window selection color:	窗口选择颜色：
+	X	X
+	Xrefs	外部参照
+	Y	Y
+	Zoom Dynamic	动态缩放
+	Zoom Realtime	实时缩放
+	contains authoring elements. Open in Block Editor?	包含编创元素。是否在块编辑器中打开？
+	min	分钟
+	objects	个对象
+menu	Dimension	标注
+menu	Draw	绘图
+menu	Modify	修改
+menu	View	视图
+	Entered model space (MSPACE). Double-click the object again to edit it.	已进入模型空间（MSPACE），请再次双击要编辑的对象。
+	Opened the Properties panel for the dimension. Edit its text override and style there.	已打开标注的属性面板，可在此编辑其文字替代与样式。
+# OviMap 联动 + 瓦片底图命令（docs/ovimap-link.md §7.2、§9）。
+	Assign OviMap Identity	分配 OviMap 身份
+	Export OviMap…	导出 OviMap…
+	Import OviMap GeoJSON…	导入 OviMap GeoJSON…
+	Inspect Link…	检查链接…
+	Inspect OviMap Link…	检查 OviMap 链接…
+	OviMap	OviMap
+	OviMap GeoJSON…	OviMap GeoJSON…
+	OviMap…	OviMap…
+	Set Georef…	设置地理参照…
+	Set OviMap Georef…	设置 OviMap 地理参照…
+	Tilemap…	瓦片底图…

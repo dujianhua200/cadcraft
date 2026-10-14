@@ -555,6 +555,7 @@ mod tests {
     /// process-wide, and other tests install writers that always fail).
     fn our_hooks() -> bool {
         set_io(IoHooks {
+            read_progress: None,
             read: |_, _| Err("no reader in tests".into()),
             write: |d, name| Ok(if name == "probe.test" { b"exchange".to_vec() } else { format!("{name}:{}", d.model.len()).into_bytes() }),
             plot: Some(fake_plot),

@@ -14,6 +14,7 @@ mod draworder;
 mod edit;
 mod exchange;
 pub mod file;
+mod gis;
 mod gripcmds;
 mod griphot;
 pub(crate) mod groups;
@@ -37,6 +38,7 @@ mod selecttools;
 mod settings;
 mod spline_opts;
 mod table;
+mod tilemap;
 mod tolerance;
 mod trimextend;
 mod utility;
@@ -202,6 +204,8 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(tolerance::specs());
         v.extend(constraints::specs());
         v.extend(lisp::specs());
+        v.extend(gis::specs());
+        v.extend(tilemap::specs());
         v
     })
 }

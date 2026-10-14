@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use super::eval::{Ctx, Flow, Special};
 use super::value::{Builtin, BuiltinKind, Sym, Value, charge_bytes, check_string_len, eq, equal, real_text, to_text};
-use super::{Env, LispError, drawing, input, read};
+use super::{Env, LispError, dcl, drawing, input, read};
 
 type R = Result<Value, LispError>;
 
@@ -307,11 +307,29 @@ fn chain(a: &[Value], ok: fn(std::cmp::Ordering) -> bool) -> R {
     }
     Ok(Value::t())
 }
+/// `=` / `/=`: structural equality, as AutoCAD's are — `(= nil nil)` is true, `(= x nil)`
+/// is false, never an error for a non-number. The ordering comparisons below stay numeric.
 fn num_eq(a: &[Value]) -> R {
-    chain(a, |o| o.is_eq())
+    arity(a, 1, usize::MAX)?;
+    for w in a.windows(2) {
+        if let [x, y] = w
+            && !equal(x, y, 0.0)
+        {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::t())
 }
 fn num_ne(a: &[Value]) -> R {
-    chain(a, |o| o.is_ne())
+    arity(a, 1, usize::MAX)?;
+    for w in a.windows(2) {
+        if let [x, y] = w
+            && equal(x, y, 0.0)
+        {
+            return Ok(Value::Nil);
+        }
+    }
+    Ok(Value::t())
 }
 fn lt(a: &[Value]) -> R {
     chain(a, |o| o.is_lt())
@@ -961,6 +979,20 @@ fn findfile(a: &[Value]) -> R {
     Ok(if file_exists(&p) { Value::Str(p) } else { Value::Nil })
 }
 
+/// Decode file bytes as text: UTF-8 when valid (a leading BOM is stripped), otherwise
+/// GBK — the encoding most legacy Chinese `.lsp` / `.dcl` files use. A lossy UTF-8 decode
+/// would turn their prompts and messages into replacement characters.
+pub fn decode_text(bytes: &[u8]) -> String {
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
+    match std::str::from_utf8(bytes) {
+        Ok(t) => t.to_string(),
+        Err(_) => {
+            let (cow, _, _) = encoding_rs::GBK.decode(bytes);
+            cow.into_owned()
+        }
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_text_file(path: &str) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
@@ -968,7 +1000,7 @@ pub fn read_text_file(path: &str) -> Option<String> {
     if bytes.len() > 64 * 1024 * 1024 {
         return None;
     }
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    Some(decode_text(&bytes))
 }
 #[cfg(target_arch = "wasm32")]
 pub fn read_text_file(_path: &str) -> Option<String> {
@@ -1276,6 +1308,8 @@ static BUILTINS: &[Builtin] = &[
     special!("DEFUN", Special::Defun),
     special!("DEFUN-Q", Special::Defun),
     special!("LAMBDA", Special::Lambda),
+    special!("LET", Special::Let),
+    special!("LET*", Special::LetStar),
     pure!("+", add),
     pure!("-", sub),
     pure!("*", mul),
@@ -1409,6 +1443,36 @@ static BUILTINS: &[Builtin] = &[
     ctx!("VL-CATCH-ALL-APPLY", vl_catch_all_apply),
     ctx!("EXIT", exit),
     ctx!("QUIT", exit),
+    // Not standard AutoLISP, but routines in the wild use `(return)` to leave a loop: it
+    // stops the routine the way `exit` does.
+    ctx!("RETURN", exit),
+    ctx!("VLAX-ENAME->VLA-OBJECT", drawing::vlax_ename_to_vla_object),
+    ctx!("VLA-GET-PROPERTY", drawing::vla_get_property),
+    ctx!("VLA-PUT-PROPERTY", drawing::vla_put_property),
+    ctx!("VLA-GET-TEXTSTRING", drawing::vla_get_textstring),
+    ctx!("VLA-PUT-TEXTSTRING", drawing::vla_put_textstring),
+    ctx!("VLA-GETBOUNDINGBOX", drawing::vla_getboundingbox),
+    ctx!("VLAX-SAFEARRAY->LIST", drawing::vlax_safearray_to_list),
+    ctx!("VLAX-CURVE-GETCLOSESTPOINTTO", drawing::vlax_curve_getclosestpointto),
+    ctx!("VLAX-CURVE-GETPARAMATPOINT", drawing::vlax_curve_getparamatpoint),
+    ctx!("VLAX-CURVE-GETFIRSTDERIV", drawing::vlax_curve_getfirstderiv),
+    ctx!("VLAX-CURVE-GETSTARTPOINT", drawing::vlax_curve_getstartpoint),
+    ctx!("VLAX-CURVE-GETENDPOINT", drawing::vlax_curve_getendpoint),
+    ctx!("LOAD_DIALOG", dcl::load_dialog),
+    ctx!("NEW_DIALOG", dcl::new_dialog),
+    ctx!("START_DIALOG", dcl::start_dialog),
+    ctx!("ACTION_TILE", dcl::action_tile),
+    ctx!("SET_TILE", dcl::set_tile),
+    ctx!("GET_TILE", dcl::get_tile),
+    ctx!("MODE_TILE", dcl::mode_tile),
+    ctx!("DIMX_TILE", dcl::dimx_tile),
+    ctx!("DIMY_TILE", dcl::dimy_tile),
+    ctx!("DONE_DIALOG", dcl::done_dialog),
+    ctx!("UNLOAD_DIALOG", dcl::unload_dialog),
+    ctx!("START_IMAGE", dcl::start_image),
+    ctx!("FILL_IMAGE", dcl::fill_image),
+    ctx!("SLIDE_IMAGE", dcl::slide_image),
+    ctx!("END_IMAGE", dcl::end_image),
     ctx!("LOAD", load),
     ctx!("AUTOLOAD", autoload),
     ctx!("INITGET", input::initget),
@@ -1423,6 +1487,8 @@ static BUILTINS: &[Builtin] = &[
     ctx!("GETKWORD", input::getkword),
     ctx!("ENTSEL", input::entsel),
     ctx!("NENTSEL", input::entsel),
+    ctx!("ENTSELP", input::entsel),
+    ctx!("NENTSELP", input::entsel),
     ctx!("COMMAND", drawing::command),
     ctx!("COMMAND-S", drawing::command),
     ctx!("VL-CMDF", drawing::command),
@@ -1430,6 +1496,7 @@ static BUILTINS: &[Builtin] = &[
     ctx!("SETVAR", drawing::setvar),
     ctx!("ENTGET", drawing::entget),
     ctx!("ENTMAKE", drawing::entmake),
+    ctx!("ENTMAKEX", drawing::entmakex),
     ctx!("ENTMOD", drawing::entmod),
     ctx!("ENTDEL", drawing::entdel),
     ctx!("ENTLAST", drawing::entlast),

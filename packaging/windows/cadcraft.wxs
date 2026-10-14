@@ -76,6 +76,16 @@
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\cadcraft.exe\shell\open\command" Value="&quot;[#CadcraftExe]&quot; &quot;%1&quot;" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.dxf\OpenWithProgids" Name="CADCraft.Drawing" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.dwg\OpenWithProgids" Name="CADCraft.Drawing" Value="" Type="string" />
+        <!-- "Open with" completeness: the ProgId's display name and icon, and the app's own
+             entry (name, icon, supported types) in the Open With dialog. The extensions
+             themselves are only offered (OpenWithProgids above), never taken over. -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\CADCraft.Drawing" Value="CADCraft Drawing" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CADCraft.Drawing" Name="FriendlyTypeName" Value="CADCraft Drawing" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\CADCraft.Drawing\DefaultIcon" Value="&quot;[#CadcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\cadcraft.exe" Name="FriendlyAppName" Value="CADCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\cadcraft.exe\DefaultIcon" Value="&quot;[#CadcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\cadcraft.exe\SupportedTypes" Name=".dxf" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\cadcraft.exe\SupportedTypes" Name=".dwg" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\CADCraft.Drawing\shell\open\command" Value="&quot;[#CadcraftExe]&quot; &quot;%1&quot;" Type="string" />
       </Component>
 

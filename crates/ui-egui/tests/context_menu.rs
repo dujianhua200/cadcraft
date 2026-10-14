@@ -185,6 +185,8 @@ fn painted(app: &mut CadApp, ctx: &egui::Context, mut events: Vec<egui::Event>, 
 #[test]
 fn shift_right_click_opens_the_snap_menu() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    // This test asserts English menu text; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     let ctx = egui::Context::default();
     app.logic(&ctx);
     painted(&mut app, &ctx, Vec::new(), egui::Modifiers::NONE);

@@ -82,6 +82,16 @@ pub enum Frame {
         lists: Vec<Value>,
         acc: Vec<Value>,
     },
+    /// `let` / `let*`: the binding whose value is being evaluated, the rest, the values so
+    /// far, the body, and (for `let*`) the bindings already installed, for unwinding.
+    Let {
+        sym: Sym,
+        rest: Vec<(Sym, Value)>,
+        done: Vec<(Sym, Value)>,
+        body: Value,
+        sequential: bool,
+        saved: Vec<(Sym, Option<Value>)>,
+    },
     /// Top-level forms of a loaded file or a command line, evaluated in turn.
     Forms {
         rest: Vec<Value>,
@@ -111,6 +121,10 @@ pub enum Special {
     Or,
     Defun,
     Lambda,
+    /// `(let ((var value)…) body…)`: values in the outer scope, bound together.
+    Let,
+    /// `(let* ((var value)…) body…)`: each value sees the bindings before it.
+    LetStar,
 }
 
 /// What a built-in asks of the machine.
@@ -139,6 +153,9 @@ pub enum Need {
     Get(super::input::GetRequest),
     /// `pause` inside `command`: the running command takes one input from the user.
     Pause,
+    /// `start_dialog`: the UI shows the dialog ([`Session::lisp_dialog_open`]) and the
+    /// routine carries on when a button (or a dismiss) finishes it.
+    Dialog,
     /// The step budget ran out: let the interface draw a frame, then carry on.
     Yield,
 }
@@ -231,6 +248,7 @@ impl Machine {
         while let Some(frame) = self.stack.pop() {
             match frame {
                 Frame::Unbind { saved } => restore(ctx.env, saved),
+                Frame::Let { saved, .. } => restore(ctx.env, saved),
                 Frame::Foreach { var, saved, .. } => restore(ctx.env, vec![(var, saved)]),
                 Frame::Catch if !e.quit => {
                     self.state = State::Ret(super::builtins::catch_all_error(&e.msg));
@@ -356,6 +374,32 @@ impl Machine {
                 self.foreach(ctx, var, v, body, saved, Value::Nil);
             }
             Frame::Foreach { var, items, body, saved } => self.foreach(ctx, var, items, body, saved, v),
+            Frame::Let { sym, rest, mut done, body, sequential, mut saved } => {
+                if sequential {
+                    saved.push((sym.clone(), ctx.env.globals.get(&sym).cloned()));
+                    ctx.env.set(&sym, v.clone());
+                }
+                done.push((sym, v));
+                if rest.is_empty() {
+                    if !sequential {
+                        let mut to_restore = Vec::with_capacity(done.len());
+                        for (s, _) in &done {
+                            to_restore.push((s.clone(), ctx.env.globals.get(s).cloned()));
+                        }
+                        for (s, val) in done {
+                            ctx.env.set(&s, val);
+                        }
+                        saved = to_restore;
+                    }
+                    self.stack.push(Frame::Unbind { saved });
+                    self.progn(body, Value::Nil);
+                } else {
+                    let mut rest = rest;
+                    let (next, expr) = rest.remove(0);
+                    self.stack.push(Frame::Let { sym: next, rest, done, body, sequential, saved });
+                    self.state = State::Eval(expr);
+                }
+            }
             Frame::Unbind { saved } => {
                 restore(ctx.env, saved);
                 self.state = State::Ret(v);
@@ -510,6 +554,32 @@ impl Machine {
                 self.state = State::Ret(Value::Sym(name));
             }
             Special::Lambda => self.state = State::Ret(make_func(None, args)?),
+            Special::Let | Special::LetStar => {
+                let sequential = sp == Special::LetStar;
+                let bindings = args.car();
+                if !bindings.is_list() {
+                    return Err(LispError::bad_arg("listp", &bindings));
+                }
+                let mut rest = Vec::new();
+                for b in bindings.iter() {
+                    match b {
+                        Value::Sym(s) => rest.push((s, Value::Nil)),
+                        Value::Cons(c) => {
+                            let Value::Sym(s) = c.car.clone() else { return Err(LispError::bad_arg("symbolp", &c.car)) };
+                            rest.push((s, c.cdr.car()));
+                        }
+                        other => return Err(LispError::bad_arg("listp", &other)),
+                    }
+                }
+                let body = args.cdr();
+                if rest.is_empty() {
+                    self.progn(body, Value::Nil);
+                } else {
+                    let (sym, expr) = rest.remove(0);
+                    self.stack.push(Frame::Let { sym, rest, done: Vec::new(), body, sequential, saved: Vec::new() });
+                    self.state = State::Eval(expr);
+                }
+            }
         }
         Ok(())
     }
@@ -545,6 +615,11 @@ impl Machine {
                     ctx.env.set(p, a);
                 }
                 for l in &func.locals {
+                    // A local with a parameter's name does not clobber the argument: the
+                    // parameter binding stands (routines in the wild declare both).
+                    if func.params.contains(l) {
+                        continue;
+                    }
                     saved.push((l.clone(), ctx.env.globals.get(l).cloned()));
                     ctx.env.set(l, Value::Nil);
                 }

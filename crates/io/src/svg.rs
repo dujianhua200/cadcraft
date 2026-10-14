@@ -25,6 +25,31 @@ pub fn export_window_with(d: &Drawing, space: &Space, window: Option<Bounds2>, t
     export_list(&list, window)
 }
 
+/// [`export_window_with`] with the basemap attribution line at the sheet's
+/// bottom-left corner (§9.2), when `attribution` is `Some`.
+pub fn export_window_with_attribution(d: &Drawing, space: &Space, window: Option<Bounds2>, transparency: bool, attribution: Option<&str>) -> String {
+    let mut list = cadcraft_render::build(d, space, &cadcraft_render::Options { transparency, ..cadcraft_render::Options::default() });
+    if let Some(text) = attribution {
+        append_attribution_to_list(&mut list, window, text, cadcraft_render::Options::default().tolerance);
+    }
+    export_list(&list, window)
+}
+
+/// Append the basemap attribution line to a plot list (§9.2): bottom-left of
+/// `window` (or the list bounds), 1% inset, 1.5% type height. A degenerate
+/// area skips the attribution.
+pub(crate) fn append_attribution_to_list(list: &mut cadcraft_render::DisplayList, window: Option<Bounds2>, text: &str, tolerance: f64) {
+    let b = window.filter(|w| !w.is_empty()).unwrap_or(list.bounds);
+    if b.is_empty() {
+        return;
+    }
+    let inset = b.width() * 0.01;
+    let height = b.height() * 0.015;
+    let at = cadcraft_geom::Vec2::new(b.min.x + inset, b.min.y + inset);
+    let opts = cadcraft_render::Options { tolerance, ..cadcraft_render::Options::default() };
+    cadcraft_render::append_list(list, cadcraft_render::attribution::attribution_text_list(text, at, height, &opts));
+}
+
 /// ` opacity="…"` for a transparent primitive (none for an opaque one or a wipeout's mask).
 fn opacity(p: &cadcraft_render::DPrim) -> String {
     if p.kind == Kind::Mask || p.transparency == 0 {

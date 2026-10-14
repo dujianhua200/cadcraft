@@ -24,6 +24,10 @@ pub enum DxfError {
     /// limit was reached), `limit` the maximum.
     #[error("drawing too large: {tags} DXF group codes, more than the {limit} CADCraft reads")]
     TooLarge { tags: usize, limit: usize },
+    /// The caller asked to stop parsing (opening was cancelled); `tags` is how many group
+    /// codes had been read. Nothing partial is returned.
+    #[error("parsing cancelled after {tags} group codes")]
+    Cancelled { tags: usize },
 }
 
 pub type Result<T> = std::result::Result<T, DxfError>;
@@ -174,6 +178,25 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Tag>> {
     parse_with_limit(bytes, MAX_TAGS)
 }
 
+/// [`parse`], calling `on_tags` every few thousand group codes with the count read so far.
+/// Returning `false` stops the parse with [`DxfError::Cancelled`]: opening a large file can be
+/// abandoned without waiting for the whole file to be parsed.
+pub fn parse_with_progress(bytes: &[u8], on_tags: &mut dyn FnMut(usize) -> bool) -> Result<Vec<Tag>> {
+    parse_with_progress_and_limit(bytes, MAX_TAGS, on_tags)
+}
+
+/// [`parse_with_progress`] with an explicit group-code limit.
+pub fn parse_with_progress_and_limit(bytes: &[u8], max_tags: usize, on_tags: &mut dyn FnMut(usize) -> bool) -> Result<Vec<Tag>> {
+    if let Some(body) = bytes.strip_prefix(BINARY_SENTINEL) {
+        return parse_binary_with_limit_and_progress(body, max_tags, on_tags);
+    }
+    let tags = bytes.iter().filter(|&&b| b == b'\n').count().div_ceil(2);
+    if tags > max_tags {
+        return Err(DxfError::TooLarge { tags, limit: max_tags });
+    }
+    parse_ascii_with_limit_and_progress(&codepage::decode_ascii_file(bytes), max_tags, on_tags)
+}
+
 /// [`parse`] with an explicit group-code limit. For ASCII DXF the limit is checked up front from
 /// the line count, before the text is decoded or any tag allocated, so an oversized file fails in
 /// milliseconds instead of after it has filled memory.
@@ -223,9 +246,11 @@ fn mif_escape_at(chars: &[char], i: usize) -> Option<char> {
 /// page (four hex digits, one UTF-16 code unit; characters above U+FFFF are a surrogate pair of
 /// escapes), and the `\M+nXXXX` sequences for double-byte East Asian characters. Malformed
 /// escapes, unpaired surrogates and unknown `\M+` code pages are kept as literal text.
-fn unescape_unicode(s: &str) -> String {
+/// Strings without escapes are borrowed, not copied: most DXF strings have none, and the
+/// parser otherwise allocated every one twice (once to hold it, once to unescape it).
+fn unescape_unicode(s: &str) -> std::borrow::Cow<'_, str> {
     if !s.contains("\\U+") && !s.contains("\\M+") {
-        return s.to_string();
+        return std::borrow::Cow::Borrowed(s);
     }
     let mut out = String::with_capacity(s.len());
     let chars: Vec<char> = s.chars().collect();
@@ -254,7 +279,7 @@ fn unescape_unicode(s: &str) -> String {
         out.push(c);
         i += 1;
     }
-    out
+    std::borrow::Cow::Owned(out)
 }
 
 pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
@@ -263,7 +288,17 @@ pub fn parse_ascii(text: &str) -> Result<Vec<Tag>> {
 
 #[allow(clippy::while_let_loop)]
 fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
-    let mut tags = Vec::new();
+    parse_ascii_with_limit_and_progress(text, max_tags, &mut |_| true)
+}
+
+/// ASCII parse with a progress callback: `on_tags` runs every 32k group codes and `false`
+/// cancels the parse. The check interval keeps the callback cheap on small files and lets a
+/// large-file open be abandoned promptly.
+#[allow(clippy::while_let_loop)]
+fn parse_ascii_with_limit_and_progress(text: &str, max_tags: usize, on_tags: &mut dyn FnMut(usize) -> bool) -> Result<Vec<Tag>> {
+    // A DXF tag is two lines (code, value) of roughly 16 bytes together; sizing the vector
+    // up front avoids repeated reallocation copies on a multi-million-tag file.
+    let mut tags = Vec::with_capacity((text.len() / 16).min(max_tags));
     let mut lines = text.lines().enumerate();
     loop {
         let Some((ln, code_line)) = lines.next() else { break };
@@ -275,14 +310,18 @@ fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
         let Some((_, val)) = lines.next() else { return Err(DxfError::Eof) };
         let v = typed(code, val);
         let v = match v {
-            Value::Str(s) => Value::Str(unescape_unicode(&s)),
+            Value::Str(s) => Value::Str(unescape_unicode(&s).into_owned()),
             o => o,
         };
         tags.push(Tag { code, value: v });
         if tags.len() > max_tags {
             return Err(DxfError::TooLarge { tags: tags.len(), limit: max_tags });
         }
-        if code == 0 && tags.last().is_some_and(|t| t.str() == "EOF") {
+        if tags.len() % 32_768 == 0 && !on_tags(tags.len()) {
+            return Err(DxfError::Cancelled { tags: tags.len() });
+        }
+        // Compare without cloning the last tag's string (the old `t.str()` copied it per tag).
+        if code == 0 && matches!(tags.last(), Some(t) if matches!(&t.value, Value::Str(s) if s == "EOF")) {
             break;
         }
     }
@@ -348,6 +387,10 @@ pub fn parse_binary(b: &[u8]) -> Result<Vec<Tag>> {
 }
 
 fn parse_binary_with_limit(b: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
+    parse_binary_with_limit_and_progress(b, max_tags, &mut |_| true)
+}
+
+fn parse_binary_with_limit_and_progress(b: &[u8], max_tags: usize, on_tags: &mut dyn FnMut(usize) -> bool) -> Result<Vec<Tag>> {
     let mut c = Cur { b, p: 0 };
     let mut text = codepage::BinaryText::default();
     let mut tags = Vec::new();
@@ -357,7 +400,7 @@ fn parse_binary_with_limit(b: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
             code = i32::from(c.i16()?);
         }
         let v = match kind_of(code) {
-            Kind::Str => Value::Str(unescape_unicode(&text.string(code, c.cstr()?))),
+            Kind::Str => Value::Str(unescape_unicode(&text.string(code, c.cstr()?)).into_owned()),
             Kind::Real => Value::Real(c.f64()?),
             Kind::Int16 => Value::Int(i64::from(c.i16()?)),
             Kind::Int32 => Value::Int(i64::from(c.i32()?)),
@@ -377,6 +420,9 @@ fn parse_binary_with_limit(b: &[u8], max_tags: usize) -> Result<Vec<Tag>> {
         tags.push(Tag { code, value: v });
         if tags.len() > max_tags {
             return Err(DxfError::TooLarge { tags: tags.len(), limit: max_tags });
+        }
+        if tags.len() % 32_768 == 0 && !on_tags(tags.len()) {
+            return Err(DxfError::Cancelled { tags: tags.len() });
         }
         if eof {
             break;
@@ -671,6 +717,21 @@ mod tests {
         let back = parse(text.as_bytes()).unwrap();
         assert_eq!(back[0].str(), "图号 Ä°ø 😀  end");
         assert_eq!(back[1].str(), "Ø");
+    }
+
+    #[test]
+    fn parse_with_progress_cancels() {
+        // Enough tags to pass the 32k callback checkpoint, then the callback stops the parse.
+        let mut text = String::new();
+        for _ in 0..40_000 {
+            text.push_str("  0\nLINE\n");
+        }
+        text.push_str("  0\nEOF\n");
+        let r = parse_with_progress(text.as_bytes(), &mut |n| n < 32_768);
+        assert!(matches!(r, Err(DxfError::Cancelled { .. })), "{r:?}");
+        // A callback that never stops parses the same text: one tag per "0 / LINE" pair.
+        let tags = parse_with_progress(text.as_bytes(), &mut |_| true).unwrap();
+        assert_eq!(tags.len(), 40_001);
     }
 
     #[test]

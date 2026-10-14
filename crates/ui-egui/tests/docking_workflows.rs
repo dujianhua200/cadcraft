@@ -9,6 +9,8 @@ use serde_json::json;
 
 fn harness(state: Option<UiState>, width: f32, scale: f32) -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    // These tests locate panels by their English labels; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("rectang", json!({"p1":[30,30],"p2":[170,110]})).unwrap();
     app.run("circle", json!({"center":[100,70],"radius":26})).unwrap();
     app.run("line", json!({"points":[[30,30],[170,110]]})).unwrap();

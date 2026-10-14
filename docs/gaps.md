@@ -1,6 +1,6 @@
 # Where CADCraft falls short of AutoCAD
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (multiline attributes read, drawn and saved: F17 narrowed) · **Target:** Autodesk AutoCAD 2027
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (macOS Finder double-click / Open With / Dock drop reaches `open_path` through an Apple Event handler: U13, P3 narrowed to Mac verification) · **Target:** Autodesk AutoCAD 2027
 
 Every known shortfall, one row each, ranked within each section by user impact. This is the work
 list: agents pick from here (top of a section first), and remove or update a row in the same PR
@@ -60,7 +60,7 @@ Detail and evidence: [ui-parity.md](ui-parity.md).
 | U10 | SETVAR covers about 150 of ~1,000 variables (UNDO options, MREDO and UNDOCTL, and header variables such as CIRCLERAD, OFFSETDIST, POLYSIDES, HPNAME and the dimension variables in SETVAR ? landed, #461; typing a bare variable name as a command runs SETVAR on it) | Low-medium | 3–5 |
 | U11 | MVIEW Restore (a saved viewport configuration into a layout); VIEW Orthographic, UCS and background settings; view twist is kept but not shown (Zoom Realtime and Dynamic, ZOOMFACTOR, named views (VIEW) and tiled model viewports with saved configurations (VPORTS) landed in #463) | Low | 1–2 |
 | U12 | Workspaces, navigation bar, CUI customisation, alias editor, ViewCube drag (#7) | Low-medium | 15–25 |
-| U13 | `.dxf` from Finder fails to open on macOS (#158) (window controls fixed, #161) | Medium | 1–2 |
+| U13 | `.dxf` from Finder fails to open on macOS (#158) (window controls fixed, #161): the Apple Event handler landed (Finder double-click / Open With / Dock drop reach `open_path` through `open_file.rs`; Cmd+Q drains as quit), still needs a Mac check | Medium | 1–2 |
 
 ## File formats
 
@@ -122,13 +122,13 @@ Detail: [localization-parity.md](localization-parity.md).
 |---|---|---|
 | P1 | Web build: plot shows raw PDF bytes (#134), no DWG (File > Open and save downloads fixed, #55, #133) | 3–5 |
 | P2 | Windows and Linux get little runtime testing; Linux Mint mouse delay (#25); Windows magnifier (#39) | 6–10 |
-| P3 | macOS file associations: opening `.dxf` from Finder fails (#158) | 1–2 |
+| P3 | macOS file associations: opening `.dxf` from Finder fails (#158): the Apple Event handler landed (Windows ProgId/DefaultIcon/FriendlyTypeName and Linux MIME aliases completed in the same change), still needs a Mac check | 1–2 |
 
 ## Ecosystem and automation
 
 | # | Gap | Est. |
 |---|---|---|
-| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup): Visual LISP ActiveX (`vlax-`, `vla-`), DCL dialogs, reactors, an APPLOAD dialog with a Startup Suite, UCS-aware `trans` | 30–50 |
+| E1 | AutoLISP beyond the core (#758 landed the language, `command`, entity lists, selection sets, `get…` input, APPLOAD, `(load)`, `c:` commands and `acad.lsp`/`acaddoc.lsp` at startup): a minimal Visual LISP ActiveX set (`vlax-`, `vla-` properties, bounding box, curve functions) and DCL dialogs (parse, tiles, actions, image placeholders) landed; still missing: reactors, an APPLOAD dialog with a Startup Suite, UCS-aware `trans`, the full ActiveX object model, a real on-screen dialog | 20–35 |
 | E3 | Express Tools equivalents (TXT2MTXT, BREAKLINE, BURST, NCOPY exists, SUPERHATCH, Move/Copy/Rotate) | 30–50 |
 | E4 | Plug-in API (owner decision: Rust/WASM plug-ins rather than ObjectARX/.NET) | 30–50 |
 | E5 | CUI customisation and alias (`.pgp`) editor | 15–25 |
@@ -145,10 +145,11 @@ Detail: [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-12 | minor | Object transparency (entity, ByLayer, ByBlock) is drawn: on screen (TRANSPARENCYDISPLAY, on by default), in PNG/SVG exports, and in plots when the page setup's "Plot transparency" is on (PDF alpha, PNG blending, SVG opacity; PLOTTRANSPARENCYOVERRIDE): F14 narrowed |
+| 2026-10-14 | minor | macOS Finder double-click / Open With / Dock drop opens the file (Apple Event handler through `fmv-macos-events`, drained into `open_path`; Cmd+Q drains as quit); Windows ProgId icon/names and Linux MIME aliases completed: U13, P3 narrowed to Mac verification |
 | 2026-10-12 | minor | Hatch and Gradient dialog (HATCH, GRADIENT; HPDLGMODE) and Hatch Edit dialog (HATCHEDIT, right-click, double-click a hatch): F13 narrowed to Preview, Inherit Properties and boundary add/remove in edit mode |
 | 2026-10-12 | minor | A bare system variable name typed at the command line (ORTHOMODE, GRIDMODE…) runs SETVAR on that variable, as in AutoCAD; U10 narrowed |
 | 2026-10-13 | minor | STRETCH takes crossing and window polygons (CP, WP), BOX and a fence (F), typed and as JSON (`polygon`, `fence`): F1 narrowed |
+| 2026-10-13 | minor | AutoLISP: GBK files decode (UTF-8 first), `entselp`/`nentselp`, `entmakex`, a minimal `vlax-`/`vla-` set, DCL dialogs with a headless path, `DATE`/`CMDACTIVE`: E1 narrowed |
 | 2026-10-12 | minor | Property-based and hostile-input tests for geometry numerics landed (deterministic xorshift generator, no new dependency; known answers at 1e6–1e7 coordinates): S6 removed |
 | 2026-10-12 | trivial | F13: HATCHEDIT refuses a bad scale or angle before editing (#724) |
 | 2026-10-12 | minor | F3: dynamic block references show their grips (distance arrows, position squares, visibility/lookup lists, per visibility state) and drag them (`blocks.reference.grips`, `blocks.reference.grip`) |

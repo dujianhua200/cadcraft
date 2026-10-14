@@ -281,6 +281,7 @@ fn recover_as_copy_opens_an_unsaved_untitled_drawing() {
 /// File hooks for every test in this file (the first call installs them).
 fn hooks() {
     set_io(IoHooks {
+        read_progress: None,
         read: |_, _| Ok(cadcraft_engine::doc::Drawing::new_metric()),
         write: |_, _| Ok(b"0\nSECTION\n0\nENDSEC\n0\nEOF\n".to_vec()),
         plot: None,

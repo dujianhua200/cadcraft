@@ -9,11 +9,103 @@ use crate::{Drawing, Entity, EntityKind, LwPolyline, Prim};
 /// Nested block references deeper than this are ignored (cyclic or hostile files).
 pub const MAX_BLOCK_DEPTH: usize = 16;
 
-/// Bounds of a single-line TEXT / ATTDEF / ATTRIB of `len` characters, following its justification
-/// the same way the renderer places it (the stroke font is about 0.88 of the height per character).
-fn text_box(t: &crate::Text, len: usize) -> Bounds2 {
+/// Whether `c` is an East Asian wide character (CJK ideographs and punctuation, kana,
+/// Hangul, fullwidth forms): the renderer draws it in a square cell, one em wide.
+/// Mirrors `cadcraft_fonts::is_wide` — `doc` (L1) may not depend on `fonts` (L2), so the
+/// ranges live here too; the parity test in `cadcraft-fonts` pins the two together.
+fn is_wide_char(c: char) -> bool {
+    matches!(u32::from(c),
+        0x1100..=0x115F
+            | 0x2E80..=0x303E
+            | 0x3041..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA000..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x20000..=0x3FFFD)
+}
+
+/// Decode `%%` control codes the way the renderer does (`%%d` degree, `%%p` plus/minus,
+/// `%%c` diameter, `%%%` percent, `%%nnn` character code; `%%u`/`%%o` toggle underline /
+/// overline and draw nothing). Mirrors `cadcraft_fonts::decode_controls` (same layering
+/// note as [`is_wide_char`]): un-decoded codes would count as several characters and
+/// inflate the box.
+fn decode_text_controls(s: &str) -> Vec<char> {
+    let mut out = Vec::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars.get(i).copied().unwrap_or(' ');
+        if c == '%' && chars.get(i + 1) == Some(&'%') {
+            let code = chars.get(i + 2).copied().unwrap_or(' ');
+            match code.to_ascii_lowercase() {
+                'd' => out.push('°'),
+                'p' => out.push('±'),
+                'c' => out.push('⌀'),
+                '%' => out.push('%'),
+                'u' | 'o' => {}
+                d if d.is_ascii_digit() => {
+                    let digits: String = chars.iter().skip(i + 2).take(3).take_while(|c| c.is_ascii_digit()).collect();
+                    let n: u32 = digits.parse().unwrap_or(32);
+                    out.push(char::from_u32(n).unwrap_or('?'));
+                    i += 2 + digits.len();
+                    continue;
+                }
+                _ => {
+                    out.push('%');
+                    i += 1;
+                    continue;
+                }
+            }
+            i += 3;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Advance width of `s` at `height` and `width_factor`, in drawing units, summed per
+/// decoded character with the renderer's advances: a wide (CJK) character takes 1.0 em
+/// (the square cell its fallback font draws); a blank takes 2/3 em; any other character
+/// takes 0.933 em, the stroke font's modal advance `(4.0 + 1.6) / 6` — the same numbers
+/// `cadcraft_fonts::char_advance` produces, minus the per-glyph table this layer cannot
+/// see. Narrow glyphs (`i`, `j`, `l`) are therefore overestimated, which is the safe
+/// direction for a bounds box. Never below one character's width, so an empty string
+/// still yields a non-degenerate box like before.
+fn text_advance_estimate(s: &str, height: f64, width_factor: f64) -> f64 {
+    let h = if height.is_finite() && height > 0.0 { height } else { 1.0 };
+    let wf = width_factor.abs().max(0.01);
+    let decoded = decode_text_controls(s);
+    let ems: f64 = decoded
+        .iter()
+        .map(|&c| {
+            if is_wide_char(c) {
+                1.0
+            } else if c.is_whitespace() {
+                (2.4 + 1.6) / 6.0
+            } else {
+                (4.0 + 1.6) / 6.0
+            }
+        })
+        .sum();
+    // `len.max(1)` behaviour of the old estimate, in ems: one blank is 2/3 em, so an
+    // empty string still measures as one (narrow) character.
+    h * wf * ems.max((4.0 + 1.6) / 6.0)
+}
+/// way the renderer places it.
+///
+/// Width is the renderer's real advance, summed per decoded character (see
+/// [`text_advance_estimate`]): a CJK character draws a ~1.0 em square cell, not the 0.9 em
+/// the old estimate assumed, so long CJK labels no longer draw past their pick box.
+fn text_box(t: &crate::Text, s: &str) -> Bounds2 {
     use crate::{HAlign, VAlign};
-    let w = t.height * 0.9 * t.width_factor.abs().max(0.01) * len.max(1) as f64;
+    let w = text_advance_estimate(s, t.height, t.width_factor);
     // Justified text (TL, ML and BL too) hangs from its alignment point (DXF group 11).
     let origin = t.justify_point();
     let dx = match t.halign {
@@ -98,8 +190,8 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
         EntityKind::Table(t) if t.is_broken() => t.bounds(),
         EntityKind::Text(t) if blank(&t.value) => Bounds2::EMPTY,
         EntityKind::MText(t) if blank(&t.contents) => Bounds2::EMPTY,
-        EntityKind::Text(t) => text_box(t, t.value.chars().count()),
-        EntityKind::AttDef(a) => text_box(&a.text, a.tag.chars().count()),
+        EntityKind::Text(t) => text_box(t, &t.value),
+        EntityKind::AttDef(a) => text_box(&a.text, &a.tag),
         EntityKind::MText(t) => mtext_box(t),
         EntityKind::Insert(ins) => {
             if depth >= MAX_BLOCK_DEPTH {
@@ -134,7 +226,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
                 if !a.invisible {
                     b = b.union(&match a.multiline_text() {
                         Some(m) => mtext_box(&m),
-                        None => text_box(&a.text, a.text.value.chars().count()),
+                        None => text_box(&a.text, &a.text.value),
                     });
                 }
             }
@@ -329,6 +421,32 @@ mod tests {
         };
         let b = bounds(EntityKind::AttDef(a));
         assert!(b.min.x <= -4.4 && b.max.x < 1.0);
+    }
+
+    #[test]
+    fn cjk_text_uses_one_em_per_character() {
+        let mut t = text(HAlign::Left, VAlign::Baseline);
+        t.value = "中文测试".into();
+        let b = bounds(EntityKind::Text(t));
+        // Four square cells: the old 0.9 em estimate gave 3.6 and clipped the glyphs.
+        assert!((b.width() - 4.0).abs() < 1e-9, "width = {}", b.width());
+    }
+
+    #[test]
+    fn control_codes_decode_to_one_character_each() {
+        let mut t = text(HAlign::Left, VAlign::Baseline);
+        t.value = "45%%d".into();
+        let b = bounds(EntityKind::Text(t));
+        // "45°": three glyphs, not the five raw characters.
+        assert!((b.width() - 3.0 * (4.0 + 1.6) / 6.0).abs() < 1e-9, "width = {}", b.width());
+    }
+
+    #[test]
+    fn mixed_text_sums_per_character_advances() {
+        let mut t = text(HAlign::Left, VAlign::Baseline);
+        t.value = "A中".into();
+        let b = bounds(EntityKind::Text(t));
+        assert!((b.width() - ((4.0 + 1.6) / 6.0 + 1.0)).abs() < 1e-9, "width = {}", b.width());
     }
 
     #[test]

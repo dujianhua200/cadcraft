@@ -38,6 +38,26 @@ impl Limits {
     pub const DEFAULT: Limits = Limits { max_dwg_bytes: 512 << 20, max_dxf_bytes: 1 << 30 };
 }
 
+/// The kind of cached picture inside an OLE2FRAME's embedded data, when one could be
+/// classified. Only the kind is kept: the picture bytes themselves are not stored (the
+/// renderer re-derives the EMF bytes from the entity's 310 groups when it draws the
+/// frame; raster/WMF previews stay placeholders).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OlePreviewKind {
+    /// A complete raster file (BMP/PNG/JPEG/GIF).
+    Raster,
+    /// A headerless DIB (BITMAPINFO + bits), as CF_DIB stores it.
+    Dib,
+    /// An enhanced metafile (EMF) record stream.
+    Emf,
+    /// A Windows metafile (WMF).
+    Wmf,
+}
+
+/// Largest OLE payload classified at all: the embedded data is hostile input, and a
+/// many-megabyte blob would cost more to walk than the preview kind is worth.
+pub const MAX_OLE_PREVIEW_BYTES: usize = 4 << 20;
+
 /// A byte count in megabytes for messages ("9.9 MB", "1024 MB").
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn mb(n: u64) -> String {
@@ -52,7 +72,40 @@ mod native {
 
     use super::{Limits, mb};
 
-    /// Read DWG bytes and return an ASCII DXF rendition, within [`Limits::DEFAULT`].
+    /// Classify the cached picture in an OLE2FRAME's embedded data (`encoded_payload`,
+    /// frame header + OLE compound file): `None` when there is no classifiable preview
+    /// or the payload is over [`MAX_OLE_PREVIEW_BYTES`](super::MAX_OLE_PREVIEW_BYTES).
+    /// The extraction copies the picture bytes transiently to classify them, then drops
+    /// them.
+    pub fn ole_preview_kind(data: &[u8]) -> Option<super::OlePreviewKind> {
+        if data.len() > super::MAX_OLE_PREVIEW_BYTES {
+            return None;
+        }
+        match acadrust::entities::extract_presentation(data) {
+            Some(acadrust::entities::OlePresentation::Raster(_)) => Some(super::OlePreviewKind::Raster),
+            Some(acadrust::entities::OlePresentation::Dib(_)) => Some(super::OlePreviewKind::Dib),
+            Some(acadrust::entities::OlePresentation::Emf(_)) => Some(super::OlePreviewKind::Emf),
+            Some(acadrust::entities::OlePresentation::Wmf(_)) => Some(super::OlePreviewKind::Wmf),
+            None => None,
+        }
+    }
+
+    /// The EMF record stream inside an OLE2FRAME's embedded data (`encoded_payload`,
+    /// frame header + OLE compound file): `None` when there is no EMF preview, the
+    /// payload is over [`MAX_OLE_PREVIEW_BYTES`](super::MAX_OLE_PREVIEW_BYTES), or the
+    /// preview is a raster/WMF picture (those stay placeholders). The bytes are the raw
+    /// EMF record stream, reassembled from the Office "WMFC" comment chunks when the
+    /// preview was stored that way; the caller parses the records.
+    pub fn ole_emf_bytes(data: &[u8]) -> Option<Vec<u8>> {
+        if data.len() > super::MAX_OLE_PREVIEW_BYTES {
+            return None;
+        }
+        match acadrust::entities::extract_presentation(data) {
+            Some(acadrust::entities::OlePresentation::Emf(bytes)) => Some(bytes),
+            _ => None,
+        }
+    }
+
     pub fn dwg_to_dxf(bytes: &[u8]) -> Result<Vec<u8>, String> {
         dwg_to_dxf_with(bytes, Limits::DEFAULT)
     }
@@ -407,7 +460,7 @@ mod native {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as};
+pub use native::{dwg_to_dxf, dwg_to_dxf_noted, dwg_to_dxf_with, dxf_to_dwg, dxf_to_dwg_as, ole_emf_bytes, ole_preview_kind};
 
 /// The error for a DWG version CADCraft can't write.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -416,25 +469,40 @@ fn unsupported(version: &str) -> String {
     format!("DWG version `{version}` can't be written (CADCraft writes {})", list.join(", "))
 }
 
+/// Why the web build cannot open DWG: the DWG reader memory-maps files and links native
+/// code, neither of which runs in the browser sandbox. This is a real limitation, not a
+/// missing file: the message says so and points at the working alternative (DXF).
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf(_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DWG files can't be opened in the web build yet; save as DXF".into())
+    Err("网页版暂不支持打开 DWG 文件：DWG 解码依赖内存映射与原生代码，无法在浏览器沙箱中运行。请先把文件另存为 DXF 再打开。".into())
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf_noted(_bytes: &[u8], _limits: Limits) -> Result<(Vec<u8>, Vec<String>), String> {
-    Err("DWG files can't be opened in the web build yet; save as DXF".into())
+    Err("网页版暂不支持打开 DWG 文件：DWG 解码依赖内存映射与原生代码，无法在浏览器沙箱中运行。请先把文件另存为 DXF 再打开。".into())
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dwg_to_dxf_with(_bytes: &[u8], _limits: Limits) -> Result<Vec<u8>, String> {
-    Err("DWG files can't be opened in the web build yet; save as DXF".into())
+    Err("网页版暂不支持打开 DWG 文件：DWG 解码依赖内存映射与原生代码，无法在浏览器沙箱中运行。请先把文件另存为 DXF 再打开。".into())
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dxf_to_dwg(_dxf: &[u8]) -> Result<Vec<u8>, String> {
-    Err("DWG files can't be written in the web build yet; save as DXF".into())
+    Err("网页版暂不支持写入 DWG 文件：DWG 编码依赖原生代码，无法在浏览器沙箱中运行。请另存为 DXF。".into())
 }
 #[cfg(target_arch = "wasm32")]
 pub fn dxf_to_dwg_as(_dxf: &[u8], _version: &str) -> Result<Vec<u8>, String> {
-    Err("DWG files can't be written in the web build yet; save as DXF".into())
+    Err("网页版暂不支持写入 DWG 文件：DWG 编码依赖原生代码，无法在浏览器沙箱中运行。请另存为 DXF。".into())
+}
+
+/// The web build has no DWG reader, so no OLE preview is ever classified there.
+#[cfg(target_arch = "wasm32")]
+pub fn ole_preview_kind(_data: &[u8]) -> Option<OlePreviewKind> {
+    None
+}
+
+/// The web build has no DWG reader, so no OLE preview is ever extracted there.
+#[cfg(target_arch = "wasm32")]
+pub fn ole_emf_bytes(_data: &[u8]) -> Option<Vec<u8>> {
+    None
 }
 
 #[cfg(test)]
@@ -452,5 +520,36 @@ mod tests {
     fn garbage_is_an_error_not_a_crash() {
         assert!(dwg_to_dxf(b"AC1032 this is not a dwg file at all").is_err());
         assert!(dwg_to_dxf(b"").is_err());
+    }
+}
+
+#[cfg(test)]
+mod ole_preview_tests {
+    use super::*;
+
+    fn bmp() -> Vec<u8> {
+        // A minimal 2×2 24-bit BMP: the legacy scan finds it as a raster preview.
+        let mut b = Vec::new();
+        b.extend_from_slice(b"BM");
+        b.extend_from_slice(&70u32.to_le_bytes());
+        b.extend_from_slice(&[0; 4]);
+        b.extend_from_slice(&54u32.to_le_bytes());
+        b.extend_from_slice(&40u32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&2i32.to_le_bytes());
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&24u16.to_le_bytes());
+        b.extend_from_slice(&[0; 24]);
+        b.extend_from_slice(&[0; 16]);
+        b
+    }
+
+    #[test]
+    fn ole_preview_kind_classifies_bmp_and_rejects_garbage() {
+        assert_eq!(ole_preview_kind(b""), None);
+        assert_eq!(ole_preview_kind(b"not an ole blob at all"), None);
+        assert_eq!(ole_preview_kind(&bmp()), Some(OlePreviewKind::Raster));
+        // Over the cap: never walked, however hostile.
+        assert_eq!(ole_preview_kind(&vec![0u8; MAX_OLE_PREVIEW_BYTES + 1]), None);
     }
 }

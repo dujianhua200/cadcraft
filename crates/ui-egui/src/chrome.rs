@@ -469,12 +469,32 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
         if let Some(n) = switch {
             let _ = app.run("layout.set", json!({ "name": n }));
         }
+        // Basemap attribution (§9.2): visible whenever tiles are on, hidden
+        // with them; a custom source's attribution shows verbatim. It takes
+        // the left of the readout slot, elided, with the full text on hover.
+        let mut left = x + 8.0;
+        if let Ok(doc) = app.session.doc()
+            && let Some(attr) = crate::tiles::attribution(doc)
+        {
+            let width = (coord_right - left - 8.0).clamp(0.0, 280.0);
+            if width > 40.0 {
+                let mut job = egui::text::LayoutJob::simple_singleline(attr.clone(), crate::theme::body(), t.text_dim);
+                job.wrap.max_width = width;
+                job.wrap.max_rows = 1;
+                job.wrap.break_anywhere = true;
+                let galley = p.layout_job(job);
+                let gw = galley.size().x.min(width);
+                let rect = Rect::from_min_max(pos2(left, r.top()), pos2(left + width, r.bottom()));
+                p.with_clip_rect(rect).galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, t.text_dim);
+                ui.interact(rect, ui.id().with("status_tilemap"), Sense::hover()).on_hover_text(attr);
+                left += gw + 12.0;
+            }
+        }
         // A transient message occupies the same bounded readout slot as coordinates.
         // Ellipsis and a tooltip keep either value readable without covering layout tabs.
         let message = app.status.as_ref().filter(|(_, at)| crate::now_ms() - at < 5000.0).map(|(message, _)| message);
         let readout = message.cloned().or(coord);
         if let Some(text) = readout {
-            let left = x + 8.0;
             let width = (coord_right - left).max(0.0);
             if width > 4.0 {
                 let color = if message.is_some() { t.warn } else { t.text };

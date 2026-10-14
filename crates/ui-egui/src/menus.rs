@@ -698,7 +698,12 @@ mod tests {
 
     #[test]
     fn plot_and_print_open_the_plot_dialog_and_exportpdf_asks_for_a_file() {
-        set_io(IoHooks { read: |_, _| Err("no reader in tests".into()), write: |_, _| Err("no writer in tests".into()), plot: Some(fake_plot) });
+        set_io(IoHooks {
+            read_progress: None,
+            read: |_, _| Err("no reader in tests".into()),
+            write: |_, _| Err("no writer in tests".into()),
+            plot: Some(fake_plot),
+        });
         if io().and_then(|h| h.plot).is_none() {
             return; // another test installed hooks without a plotter first
         }

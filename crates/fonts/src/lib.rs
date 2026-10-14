@@ -639,6 +639,36 @@ mod tests {
         assert!((bb.width() - 10.0).abs() < 1e-6);
         assert!((bb.max.y - 1.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn doc_text_bounds_cover_renderer_advance() {
+        // `cadcraft-doc` (L1) cannot depend on this crate (L2), so its text-box estimate
+        // mirrors this crate's advance rule; this test (dev-dependency, L2 -> L1) pins
+        // the two together: the doc box must cover what the renderer draws (the safety
+        // property pick/extents rely on) without grossly overshooting it.
+        use cadcraft_doc::{Drawing, Entity, EntityKind, Handle, Text, entity_bounds};
+        use cadcraft_geom::Vec3;
+        for s in ["HELLO", "中文测试", "杆号A123", "45%%d", "iii", "W 杆"] {
+            let p = TextParams::new(Vec2::ZERO, 1.0);
+            let (_, bb) = place(&TextFont::Stroke, s, &p);
+            let t = Text {
+                insert: Vec3::new(0.0, 0.0, 0.0),
+                align_pt: None,
+                height: 1.0,
+                value: s.into(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".into(),
+                halign: cadcraft_doc::HAlign::Left,
+                valign: cadcraft_doc::VAlign::Baseline,
+            };
+            let b = entity_bounds(&Drawing::default(), &Entity::new(Handle(1), EntityKind::Text(t)), 0);
+            let (dw, fw) = (b.width(), bb.width());
+            assert!(dw + 1e-9 >= fw, "{s:?}: doc box {dw} narrower than renderer {fw}");
+            assert!(dw <= fw + 0.75 * s.chars().count() as f64 + 0.1, "{s:?}: doc box {dw} far wider than renderer {fw}");
+        }
+    }
 }
 
 #[cfg(test)]

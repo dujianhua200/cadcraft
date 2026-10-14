@@ -564,3 +564,67 @@ fn space_names_its_tab() {
     assert_eq!(p.layout(), Some("Sheet A"));
     assert_eq!(p.tab_name(), "Sheet A");
 }
+
+#[test]
+fn ole_frame_draws_as_rectangle_and_diagonals() {
+    let ole = || {
+        EntityKind::Unknown(Unknown {
+            dxf_type: "OLE2FRAME".into(),
+            tags: vec![
+                RawTag { code: 10, value: "10".into() },
+                RawTag { code: 20, value: "20".into() },
+                RawTag { code: 30, value: "0".into() },
+                RawTag { code: 11, value: "30".into() },
+                RawTag { code: 21, value: "5".into() },
+                RawTag { code: 31, value: "0".into() },
+            ],
+            ole: Some(OleFrame {
+                upper_left: Vec3::new(10.0, 20.0, 0.0),
+                lower_right: Vec3::new(30.0, 5.0, 0.0),
+                source_app: String::new(),
+                object_type: 2,
+                preview: None,
+            }),
+        })
+    };
+    // Rectangle + both diagonals: six segments, so the frame selects and has extents.
+    assert_eq!(ole().prims().len(), 6);
+    assert!(ole().prims().iter().all(|p| matches!(p, Prim::Seg(_))));
+    let mut d = Drawing::new_imperial();
+    d.add(&Space::Model, Common::default(), ole()).unwrap();
+    assert_eq!(d.extents(&Space::Model).min, Vec2::new(10.0, 5.0));
+    assert_eq!(d.extents(&Space::Model).max, Vec2::new(30.0, 20.0));
+    // A degenerate frame and a non-OLE unknown draw nothing.
+    let mut deg = ole();
+    if let EntityKind::Unknown(u) = &mut deg
+        && let Some(o) = &mut u.ole
+    {
+        o.lower_right = o.upper_left;
+    }
+    assert!(deg.prims().is_empty());
+    assert!(EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None }).prims().is_empty());
+    // Labels: no preview says so; a classified preview does not claim otherwise.
+    if let EntityKind::Unknown(u) = &ole() {
+        assert_eq!(u.ole.as_ref().unwrap().label(), "OLE 嵌入对象（预览不可用）");
+        let mut with_preview = u.ole.clone().unwrap();
+        with_preview.preview = Some(OlePreviewKind::Emf);
+        assert_eq!(with_preview.label(), "OLE 嵌入对象");
+        with_preview.source_app = "Excel.Sheet.12".into();
+        assert_eq!(with_preview.label(), "OLE 嵌入对象 · Excel.Sheet.12");
+    } else {
+        panic!("expected Unknown");
+    }
+    // Moving the frame moves its corners and rewrites the raw tags, so a DXF round
+    // trip (which writes the tags verbatim) keeps the new frame.
+    let mut moved = ole();
+    moved.transform(&Mat3::translate(Vec2::new(5.0, 5.0)));
+    if let EntityKind::Unknown(u) = &moved {
+        let o = u.ole.as_ref().unwrap();
+        assert_eq!((o.upper_left.x, o.upper_left.y), (15.0, 25.0));
+        assert_eq!((o.lower_right.x, o.lower_right.y), (35.0, 10.0));
+        assert_eq!(u.tags.iter().find(|t| t.code == 10).map(|t| t.value.as_str()), Some("15"));
+        assert_eq!(u.tags.iter().find(|t| t.code == 21).map(|t| t.value.as_str()), Some("10"));
+    } else {
+        panic!("expected Unknown");
+    }
+}

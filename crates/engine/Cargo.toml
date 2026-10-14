@@ -18,11 +18,15 @@ cadcraft-fonts = { workspace = true }
 cadcraft-render = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# GBK decoding for legacy `.lsp` / `.dcl` files (UTF-8 first, GBK fallback).
+encoding_rs = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 # R-tree spatial index for picking, window selection and object snaps (MIT OR Apache-2.0).
 rstar = { version = "0.12", default-features = false }
-
-[dev-dependencies]
-# Real DXF files for the external reference tests (io is a lower layer).
+# The tile fetcher reuses `cadcraft-io`'s tile disk cache (7-day TTL, 500 MB LRU,
+# §9.4) instead of duplicating it.
 cadcraft-io = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = { workspace = true }

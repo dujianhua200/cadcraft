@@ -8,12 +8,12 @@ use cadcraft_engine::doc::{Block, Common, Drawing, EntityKind, RawTag, Space, Un
 use serde_json::json;
 
 fn unknown(kind: &str) -> EntityKind {
-    EntityKind::Unknown(Unknown { dxf_type: kind.into(), tags: vec![RawTag { code: 8, value: "0".into() }] })
+    EntityKind::Unknown(Unknown { dxf_type: kind.into(), tags: vec![RawTag { code: 8, value: "0".into() }], ole: None })
 }
 
 #[test]
 fn save_lists_the_entities_the_file_does_not_keep() {
-    set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
+    set_io(IoHooks { read_progress: None, read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     let mut d = Drawing::new_imperial();
     for k in ["MLINE", "3DSOLID", "MLINE"] {
         d.add(&Space::Model, Common::default(), unknown(k)).unwrap();
@@ -29,7 +29,7 @@ fn save_lists_the_entities_the_file_does_not_keep() {
     let r = s.execute("saveas", &json!({ "path": path.to_string_lossy() })).unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(r["notSaved"], json!({ "3DSOLID": 1, "MLINE": 2, "REGION": 1 }));
-    let msg = "Not saved in the DWG file (its writer can't write these object types yet; DXF keeps them): 1 3DSOLID, 2 MLINE, 1 REGION";
+    let msg = "未保存到 DWG 文件中（其写入器尚不支持这些对象类型；DXF 会保留它们）：1 3DSOLID，2 MLINE，1 REGION";
     assert!(s.log.iter().any(|l| l == msg), "{:?}", s.log);
 
     // DXF keeps them.

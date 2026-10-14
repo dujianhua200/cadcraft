@@ -8,6 +8,8 @@ use egui_kittest::kittest::Queryable;
 
 fn app() -> CadApp {
     let mut app = CadApp::new(Session::default(), Services::default());
+    // This test locates controls by their English labels; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("ui.sample", serde_json::json!({})).unwrap();
     app
 }

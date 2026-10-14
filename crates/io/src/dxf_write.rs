@@ -1761,6 +1761,43 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
     if let Some(chunks) = dxf_ext::anno_chunks(d) {
         xrecords.push((dxf_ext::ANNOTATION_KEY, w.h(), chunks));
     }
+    // OviMap link (§4.3): the OVIMAP_GEOREF dictionary + its GEOREF and VERTICES_*
+    // XRECORDs. Handles are allocated here so the root dictionary can name the
+    // dictionary; the objects themselves are written with the other OBJECTS.
+    // A VERTICES entry whose key is illegal for a DXF dictionary is skipped here:
+    // the link export path (`ovimap.export`) validates first and fails instead, and
+    // silently renaming the key would break the key ↔ track link (R2). A vertex
+    // without an id drops its whole entry (a short entry would make the file's
+    // VERTICES count disagree and get the file rejected on import; a missing entry
+    // degrades to regenerated ids + a warning, §4.6).
+    let ovimap_dict = if d.georef.is_some() || d.ovimap_ext.values().any(|e| !e.vertices.is_empty()) { Some(w.h()) } else { None };
+    let ovimap_georef_handle = if d.georef.is_some() && ovimap_dict.is_some() { Some(w.h()) } else { None };
+    let mut ovimap_vertices: Vec<(String, String, Vec<String>)> = Vec::new();
+    if ovimap_dict.is_some() {
+        for (id, e) in &d.ovimap_ext {
+            if e.vertices.is_empty() {
+                continue;
+            }
+            let key = format!("{}{}", dxf_ext::OVIMAP_VERTICES_PREFIX, id);
+            if !dxf_ext::valid_dict_key(&key) {
+                continue;
+            }
+            let mut ids = Vec::new();
+            let mut ok = true;
+            for v in &e.vertices {
+                match v.get("ovimap_id").and_then(serde_json::Value::as_str) {
+                    Some(s) if !s.is_empty() => ids.push(s.to_string()),
+                    _ => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if ok {
+                ovimap_vertices.push((key, w.h(), ids));
+            }
+        }
+    }
     // The annotation scale list: the ACAD_SCALELIST dictionary of SCALE objects.
     let scale_dict = w.h();
     let scales: Vec<(&cadcraft_doc::AnnoScale, String)> = d.scales.iter().filter(|s| s.is_valid()).map(|s| (s, w.h())).collect();
@@ -2231,6 +2268,10 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.s(3, *key);
         w.s(350, h);
     }
+    if let Some(h) = &ovimap_dict {
+        w.s(3, dxf_ext::OVIMAP_GEOREF_KEY);
+        w.s(350, h);
+    }
     w.s(3, "ACAD_SCALELIST");
     w.s(350, scale_dict.clone());
     w.s(0, "DICTIONARY");
@@ -2304,6 +2345,42 @@ fn tags_for(d: &Drawing, version: Version, target: Version) -> Vec<Tag> {
         w.i(280, 1);
         for c in chunks {
             w.s(1, c.clone());
+        }
+    }
+    // OviMap link (§4.3): the OVIMAP_GEOREF dictionary with its GEOREF XRECORD and one
+    // VERTICES_<lineGroupId> XRECORD per track.
+    if let Some(dict) = &ovimap_dict {
+        w.s(0, "DICTIONARY");
+        w.s(5, dict);
+        w.s(330, root_dict.clone());
+        w.s(100, "AcDbDictionary");
+        w.i(280, 1);
+        w.i(281, 1);
+        if let Some(h) = &ovimap_georef_handle {
+            w.s(3, dxf_ext::OVIMAP_GEOREF_ENTRY);
+            w.s(350, h);
+        }
+        for (key, h, _) in &ovimap_vertices {
+            w.s(3, key);
+            w.s(350, h);
+        }
+        if let (Some(h), Some(g)) = (&ovimap_georef_handle, &d.georef) {
+            w.s(0, "XRECORD");
+            w.s(5, h);
+            w.group("ACAD_REACTORS", 330, &[dict]);
+            w.s(330, dict);
+            w.s(100, "AcDbXrecord");
+            w.i(280, 1);
+            w.t.extend(dxf_ext::georef_tags(g));
+        }
+        for (_, h, ids) in &ovimap_vertices {
+            w.s(0, "XRECORD");
+            w.s(5, h);
+            w.group("ACAD_REACTORS", 330, &[dict]);
+            w.s(330, dict);
+            w.s(100, "AcDbXrecord");
+            w.i(280, 1);
+            w.t.extend(dxf_ext::vertices_tags(ids));
         }
     }
     scale_list(&mut w, &scales, &scale_dict, &root_dict);

@@ -66,7 +66,9 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let t = Tokens::get();
     let (rect, scale) = app.canvas.xf.map_or((ctx.content_rect(), 20.0), |x| (x.rect, x.scale.max(1e-6)));
     let mut st = ctx.data_mut(|d| d.get_temp::<State>(state_id())).unwrap_or_else(|| {
-        let mut fmt = Formatted::default();
+        // Editing an existing MTEXT (TEXTEDIT) starts from its contents, parsed into
+        // formats; a fresh MTEXT starts empty (its `editing_mtext` contents are "").
+        let mut fmt = Formatted::from_contents(&mt.contents);
         if let Some(f) = app.session.doc().ok().and_then(|d| d.text_style(&mt.style).map(|s| s.font.clone())) {
             // A family name, not a font file (`txt.shx`, `arial.ttf`).
             if !f.is_empty() && !f.contains('.') {
@@ -122,7 +124,10 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         Done::Ok => {
             ctx.data_mut(|d| d.remove::<State>(state_id()));
             // The editor holds the whole contents: one input, then Enter ends MTEXT's text entry.
-            if !st.fmt.is_empty() {
+            // TEXTEDIT takes the text even when the editor was emptied (clearing the MTEXT);
+            // MTEXT creation keeps the old behaviour (empty means no entity).
+            let textedit = app.session.running.as_ref().is_some_and(|r| r.id == "textedit");
+            if !st.fmt.is_empty() || textedit {
                 let _ = app.session.input(cadcraft_engine::Input::Text(st.fmt.to_contents()));
             }
             if app.session.running.as_ref().is_some_and(|r| r.id == "mtext") {
@@ -462,8 +467,34 @@ fn text_box(ui: &mut egui::Ui, st: &mut State, base_h: f64, px: f32, width: f32,
 mod tests {
     use super::*;
     use cadcraft_engine::Session;
+    use serde_json::json;
 
     use crate::Services;
+
+    #[test]
+    fn editor_opens_for_textedit_on_existing_mtext_with_its_contents() {
+        let ctx = egui::Context::default();
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let frame = |app: &mut CadApp| {
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1200.0, 800.0))), ..Default::default() };
+            for _ in 0..2 {
+                let mut out = ctx.run_ui(input.clone(), |ui| show(app, ui.ctx()));
+                out.textures_delta.clear();
+            }
+        };
+        app.session.execute("mtext", &json!({"at": [0, 5], "text": "hello"})).unwrap();
+        app.start("textedit");
+        // Pick the MTEXT at its bounds centre, as a double-click would.
+        let d = app.session.doc().unwrap();
+        let e = d.model.iter().find(|e| matches!(&e.kind, cadcraft_engine::doc::EntityKind::MText(_))).unwrap().clone();
+        let centre = cadcraft_doc::entity_bounds(d, &e, 0).center();
+        let _ = d;
+        app.session.input(cadcraft_engine::Input::Point(centre)).unwrap();
+        assert!(app.session.editing_mtext().is_some(), "textedit offers the picked mtext");
+        frame(&mut app);
+        let st = ctx.data_mut(|d| d.get_temp::<State>(state_id())).expect("editor open for textedit");
+        assert_eq!(st.fmt.text(), "hello", "the editor starts from the existing contents");
+    }
 
     #[test]
     fn editor_opens_only_for_mtext_text_entry_and_finishes_with_formatted_contents() {

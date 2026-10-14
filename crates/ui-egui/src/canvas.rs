@@ -119,6 +119,8 @@ pub struct CanvasState {
     hover_at: Option<Pos2>,
     /// Constraint glyphs for the parametric overlay (cached per drawing revision).
     pub param: crate::parametric::Cache,
+    /// Basemap tile textures + failed-tile back-off (see [`crate::tiles`]).
+    pub(crate) tilemap: crate::tiles::TileCache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
@@ -1370,7 +1372,11 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.canvas.hot_grips.clear();
             app.session.pending_window = None;
             app.canvas.drag_window = false;
-            if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_err() && active_vp.is_some() {
+            if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_ok() {
+                // First double-click inside a layout viewport only enters model space;
+                // say so (in the user's language) instead of silently doing nothing.
+                app.session.echo(crate::i18n::t("Entered model space (MSPACE). Double-click the object again to edit it."));
+            } else if active_vp.is_some() {
                 let _ = app.run("pspace", serde_json::json!({}));
             }
             app.session.pending_window = None;
@@ -1632,10 +1638,32 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // `masked`: its outline is in the stencil buffer this frame.
     let mut masked = false;
     if let Some(f) = ensure_vp_content(app, &xf_paper, ui.ctx()) {
+        // Basemap tiles inside the active viewport (paper space, §9): under
+        // its vector contents, clipped to the viewport, with the viewport's
+        // own model-to-screen transform. A clipped viewport's outline mask
+        // covers vectors only, so it gets no basemap.
+        if f.outline.is_none()
+            && let Ok(doc) = app.session.doc()
+        {
+            let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
+            let xf_vp = Xf { rect: f.on_screen, center: f.xf.to_world(f.on_screen.center()), scale: f.xf.scale };
+            crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &clipped, &xf_vp, ui.ctx());
+        }
         let gpu = app.canvas.gpu.is_some();
         let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
         draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
         masked = gpu && f.outline.is_some();
+    }
+    // Basemap tiles under the vectors: model space through the canvas view;
+    // paper space inside each layout viewport (each with its own view), never
+    // on the sheet itself. Missing tiles stay blank until the background
+    // fetcher lands them (§9.4).
+    if let Ok(doc) = app.session.doc() {
+        if sheet.is_none() {
+            crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &painter, &xf_paper, ui.ctx());
+        } else {
+            draw_layout_viewport_tiles(&app.session, &mut app.canvas.tilemap, doc, &painter, &xf_paper, rect, ui.ctx());
+        }
     }
     if app.canvas.gpu.is_some() {
         draw_list_gpu(&mut app.canvas, &painter, &xf_paper, bg, app.session.settings.lwdisplay);
@@ -1863,20 +1891,300 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
 
 /// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
 /// Start TEXTEDIT on the text, mtext or attribute definition at `p` (the objects its shortcut menu
-/// offers Edit Text for); false when there is none.
+/// offers Edit Text for); false when there is none. A dimension at `p` opens its Properties
+/// panel instead (a dimension has no in-place editor; TEXTEDIT's command-line prompt would
+/// still take its text, but the panel is where its style and overrides live).
+///
+/// A double-click that lands on text the user cannot edit in place still answers: text inside
+/// a block reference and text on a locked layer name the blocker on the command line instead
+/// of silently doing nothing.
+///
+/// When no object claims the click at all, the text search below retries with its box
+/// expanded: glyphs draw past the approximate pick box, so a double-click on the first or
+/// last character of a label at a zoomed-in view would otherwise miss the text and do nothing.
 fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
     use cadcraft_engine::doc::EntityKind;
-    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
-        app.session.doc().ok()?.entity(h).map(|e| matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)))
-    });
-    if is_text != Some(true) {
-        return false;
+    if let Some(h) = cadcraft_engine::cmd::curves::pick_at(&app.session, p) {
+        let Some(e) = app.session.doc().ok().and_then(|d| d.entity(h).cloned()) else {
+            return false;
+        };
+        match &e.kind {
+            EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) => {
+                if locked_hint(app, h, &e) {
+                    return true;
+                }
+                app.start("textedit");
+                if let Err(e) = app.session.input(Input::Point(p)) {
+                    app.session.echo(e.to_string());
+                }
+                true
+            }
+            EntityKind::Dimension(_) => {
+                if locked_hint(app, h, &e) {
+                    return true;
+                }
+                // A dimension has no in-place editor: select it and open its Properties
+                // panel, as AutoCAD's double-click does — never silently nothing.
+                app.session.set_selection(vec![h]);
+                let _ = crate::docking::command(app, false, &serde_json::json!({"operation": "open", "panel": "properties"}));
+                app.session.echo(crate::i18n::t("Opened the Properties panel for the dimension. Edit its text override and style there."));
+                true
+            }
+            EntityKind::Insert(_) => {
+                if nested_text_at(app, h, p) {
+                    app.session.echo(crate::i18n::t("Text inside a block cannot be edited here. Enter the block editor to edit it."));
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    } else {
+        // Nothing claims the click: it may sit on glyphs past a text's pick box.
+        if let Some((h, centre)) = expanded_text_at(app, p) {
+            let Some(e) = app.session.doc().ok().and_then(|d| d.entity(h).cloned()) else {
+                return false;
+            };
+            if locked_hint(app, h, &e) {
+                return true;
+            }
+            app.start("textedit");
+            // The click itself is outside the box TEXTEDIT picks with: feed the box centre,
+            // which is inside it, so the already-found text is the one that opens.
+            if let Err(e) = app.session.input(Input::Point(centre)) {
+                app.session.echo(e.to_string());
+            }
+            return true;
+        }
+        if nested_text_anywhere(app, p) {
+            app.session.echo(crate::i18n::t("Text inside a block cannot be edited here. Enter the block editor to edit it."));
+            return true;
+        }
+        false
     }
-    app.start("textedit");
-    if let Err(e) = app.session.input(Input::Point(p)) {
-        app.session.echo(e.to_string());
+}
+
+/// Echo the blocker when the text `e` (handle `h`) cannot be edited: its layer is locked, or
+/// a reference edit in progress excludes it. True when blocked (the click is answered).
+fn locked_hint(app: &mut CadApp, h: Handle, e: &cadcraft_doc::Entity) -> bool {
+    if app.session.doc().ok().is_some_and(|d| d.layer(&e.common.layer).is_some_and(|l| l.locked)) {
+        app.session.echo(crate::i18n::t("Text on a locked layer cannot be edited. Unlock the layer first."));
+        true
+    } else if cadcraft_engine::cmd::curves::is_locked(&app.session, h) {
+        app.session.echo(crate::i18n::t("The object is outside the reference-edit working set and cannot be edited."));
+        true
+    } else {
+        false
     }
-    true
+}
+
+/// How far past a text's approximate pick box its glyphs may draw, in text heights:
+/// the pick box (`entity_bounds`) now measures CJK at 1.0 em/character, but an
+/// installed fallback font's advance can still exceed it a little, and narrow-glyph
+/// strings are overestimated the other way — so containment is always confirmed
+/// against the placed bounds below, never against the pick box alone.
+/// The box the text actually draws in (the renderer's placed bounds), for a text-like
+/// entity. The placed bounds are exact; an AttDef draws its tag.
+fn placed_text_box(d: &cadcraft_doc::Drawing, e: &cadcraft_doc::Entity) -> Option<Bounds2> {
+    use cadcraft_doc::EntityKind;
+    use cadcraft_engine::render::{layout_mtext_entity, place_text_entity};
+    match &e.kind {
+        EntityKind::Text(t) => Some(place_text_entity(d, t, &t.value).1),
+        EntityKind::MText(t) => Some(layout_mtext_entity(d, t).bounds),
+        EntityKind::AttDef(a) => Some(place_text_entity(d, &a.text, &a.tag).1),
+        _ => None,
+    }
+}
+
+/// How far to widen the pick box as a cheap pre-filter before confirming against the
+/// placed bounds: real glyphs are at most ~1.5 em wide per character, so the placed box
+/// can stick out by (1.5 - 0.93) em/character beyond the pick box. Only a superset test;
+/// containment is always confirmed against [`placed_text_box`]. Kept as the fallback
+/// even though the pick box now measures CJK at 1.0 em: an installed fallback font's
+/// advance is not pinned to 1.0 em exactly.
+fn prefilter_expand(e: &cadcraft_doc::Entity, ap: f64) -> f64 {
+    use cadcraft_doc::EntityKind;
+    match &e.kind {
+        EntityKind::Text(t) => ap.max(0.6 * t.value.chars().count() as f64 * t.height * t.width_factor),
+        EntityKind::MText(t) => ap.max(0.5 * t.height),
+        EntityKind::AttDef(a) => ap.max(0.6 * a.tag.chars().count() as f64 * a.text.height * a.text.width_factor),
+        _ => ap,
+    }
+}
+
+/// The topmost text, mtext or attribute definition whose placed box (expanded by the
+/// pick aperture) contains `p`, with the point TEXTEDIT should be fed (the placed-box
+/// centre: the click itself may sit outside the pick box).
+fn expanded_text_at(app: &CadApp, p: Vec2) -> Option<(Handle, Vec2)> {
+    use cadcraft_doc::{EntityKind, entity_bounds};
+    let d = app.session.doc().ok()?;
+    let store = d.space(&app.session.space())?;
+    let ap = cadcraft_engine::cmd::curves::pick_aperture(&app.session);
+    let mut found = None;
+    for e in store.iter() {
+        if !matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)) {
+            continue;
+        }
+        if !d.is_visible(e) {
+            continue;
+        }
+        let b = entity_bounds(d, e, 0);
+        if b.is_empty() || !b.expand(prefilter_expand(e, ap)).contains(p) {
+            continue;
+        }
+        let Some(pb) = placed_text_box(d, e) else { continue };
+        if !pb.is_empty() && pb.expand(ap).contains(p) {
+            found = Some((e.handle, pb.center()));
+        }
+    }
+    found
+}
+
+/// Whether `p` sits on text inside the block reference `h`: a definition's TEXT/MTEXT, or one
+/// of the reference's own attribute values. Picking returns the INSERT for all of those, so a
+/// double-click on them would otherwise do nothing at all. Containment is tested against
+/// the placed bounds, as in [`expanded_text_at`].
+fn nested_text_at(app: &CadApp, h: Handle, p: Vec2) -> bool {
+    use cadcraft_doc::EntityKind;
+    let Ok(d) = app.session.doc() else { return false };
+    let Some(e) = d.entity(h) else { return false };
+    let EntityKind::Insert(ins) = &e.kind else { return false };
+    let ap = cadcraft_engine::cmd::curves::pick_aperture(&app.session);
+    if attrib_text_at(d, &ins.attribs, p, ap) {
+        return true;
+    }
+    let Some(blk) = d.block(&ins.block) else { return false };
+    let mut budget = 500_000usize;
+    for off in insert_copies(ins) {
+        let m = ins.transform(blk.base.xy()).then(off);
+        let mut boxes = Vec::new();
+        nested_text_boxes(d, &ins.block, m, 0, &mut budget, &mut boxes);
+        for b in boxes {
+            if b.expand(ap).contains(p) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether `p` sits on text inside any block reference in the current space, when picking
+/// claimed no object at all (a click on a text-only block's glyphs is outside the reference's
+/// own geometry). Block definitions are walked once each and their placed boxes reused for
+/// every reference to them.
+fn nested_text_anywhere(app: &CadApp, p: Vec2) -> bool {
+    use cadcraft_doc::EntityKind;
+    let Ok(d) = app.session.doc() else { return false };
+    let Some(store) = d.space(&app.session.space()) else { return false };
+    let ap = cadcraft_engine::cmd::curves::pick_aperture(&app.session);
+    let mut memo: std::collections::HashMap<String, Vec<Bounds2>> = std::collections::HashMap::new();
+    let mut budget = 500_000usize;
+    for e in store.iter() {
+        let EntityKind::Insert(ins) = &e.kind else { continue };
+        if !d.is_visible(e) {
+            continue;
+        }
+        if attrib_text_at(d, &ins.attribs, p, ap) {
+            return true;
+        }
+        let boxes = memo.entry(ins.block.clone()).or_insert_with(|| {
+            let mut v = Vec::new();
+            nested_text_boxes(d, &ins.block, cadcraft_geom::Mat3::IDENTITY, 0, &mut budget, &mut v);
+            v
+        });
+        let Some(blk) = d.block(&ins.block) else { continue };
+        for off in insert_copies(ins) {
+            let m = ins.transform(blk.base.xy()).then(off);
+            for b in boxes.iter() {
+                let wb = Bounds2::from_points(b.corners().map(|c| m.apply(c)));
+                if wb.expand(ap).contains(p) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Whether `p` sits on one of the reference's attribute values (already in world
+/// coordinates), tested against the placed bounds as in [`expanded_text_at`].
+fn attrib_text_at(d: &cadcraft_doc::Drawing, attribs: &[cadcraft_doc::Attrib], p: Vec2, ap: f64) -> bool {
+    use cadcraft_engine::render::{layout_mtext_entity, place_text_entity};
+    for a in attribs {
+        if a.invisible {
+            continue;
+        }
+        let b = match a.multiline_text() {
+            Some(m) => layout_mtext_entity(d, &m).bounds,
+            None => place_text_entity(d, &a.text, &a.text.value).1,
+        };
+        if !b.is_empty() && b.expand(ap).contains(p) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The per-copy offsets of an arrayed reference (one translation each, in its rotated frame),
+/// capped so a hostile array cannot multiply the walk.
+fn insert_copies(ins: &cadcraft_doc::Insert) -> Vec<cadcraft_geom::Mat3> {
+    let cols = ins.cols.max(1) as usize;
+    let rows = ins.rows.max(1) as usize;
+    let total = cols.saturating_mul(rows).min(4096);
+    (0..total)
+        .map(|i| {
+            let (c, r) = (i % cols, i / cols);
+            cadcraft_geom::Mat3::translate(Vec2::new(ins.col_spacing * c as f64, ins.row_spacing * r as f64).rotate(ins.rotation))
+        })
+        .collect()
+}
+
+/// The placed box of every TEXT/MTEXT inside block `name`, mapped by `m` (block-to-frame).
+/// AttDefs are skipped: they do not draw in a reference (its attribute values do, handled by
+/// [`attrib_text_at`]). The walk is bounded by [`cadcraft_doc::MAX_BLOCK_DEPTH`] and the shared
+/// `budget` of entity visits, so cyclic or hostile nesting cannot run away.
+fn nested_text_boxes(d: &cadcraft_doc::Drawing, name: &str, m: cadcraft_geom::Mat3, depth: usize, budget: &mut usize, out: &mut Vec<Bounds2>) {
+    use cadcraft_doc::EntityKind;
+    use cadcraft_engine::render::{layout_mtext_entity, place_text_entity};
+    if depth > cadcraft_doc::MAX_BLOCK_DEPTH {
+        return;
+    }
+    let Some(blk) = d.block(name) else { return };
+    for be in blk.entities.iter() {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        if !be.common.visible || matches!(be.kind, EntityKind::AttDef(_)) {
+            continue;
+        }
+        // Contents on a hidden layer do not draw (layer "0" takes the reference's layer).
+        if be.common.layer != "0" && d.layer(&be.common.layer).is_some_and(|l| !l.visible()) {
+            continue;
+        }
+        match &be.kind {
+            EntityKind::Text(t) => {
+                let b = place_text_entity(d, t, &t.value).1;
+                if !b.is_empty() {
+                    out.push(Bounds2::from_points(b.corners().map(|c| m.apply(c))));
+                }
+            }
+            EntityKind::MText(t) => {
+                let b = layout_mtext_entity(d, t).bounds;
+                if !b.is_empty() {
+                    out.push(Bounds2::from_points(b.corners().map(|c| m.apply(c))));
+                }
+            }
+            EntityKind::Insert(inner) => {
+                let Some(iblk) = d.block(&inner.block) else { continue };
+                for off in insert_copies(inner) {
+                    let im = inner.transform(iblk.base.xy()).then(off).then(m);
+                    nested_text_boxes(d, &inner.block, im, depth + 1, budget, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile)> {
@@ -1894,9 +2202,43 @@ fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
     Xf { rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12) }
 }
 
+/// Basemap tiles inside the paper-space layout viewports other than the
+/// active one (the active viewport's tiles are drawn with its contents, just
+/// before `draw_vp_content`): each viewport gets its own transform from
+/// [`crate::tiles::viewport_tile_xf`] and its own `tiles_for_view`, clipped
+/// to its rectangle on screen. Clipped (`clip`) viewports get no basemap —
+/// their outline mask covers vectors only. Never on the sheet itself.
+fn draw_layout_viewport_tiles(
+    session: &cadcraft_engine::Session,
+    tilemap: &mut crate::tiles::TileCache,
+    doc: &cadcraft_doc::Drawing,
+    painter: &egui::Painter,
+    xf_paper: &Xf,
+    rect: Rect,
+    ctx: &egui::Context,
+) {
+    let Ok(st) = session.state() else { return };
+    let space = st.space.clone();
+    let active = st.active_viewport().map(|(h, _)| h);
+    let Some(store) = doc.space(&space) else { return };
+    for e in store.iter() {
+        let cadcraft_doc::EntityKind::Viewport(vp) = &e.kind else { continue };
+        if !vp.on || vp.clip.is_some() || active == Some(e.handle) {
+            continue;
+        }
+        let Some(xf) = crate::tiles::viewport_tile_xf(xf_paper, vp.center.xy(), vp.height, vp.view_center, vp.view_height) else { continue };
+        let r = Rect::from_two_pos(
+            xf_paper.to_screen(Vec2::new(vp.center.x - vp.width / 2.0, vp.center.y + vp.height / 2.0)),
+            xf_paper.to_screen(Vec2::new(vp.center.x + vp.width / 2.0, vp.center.y - vp.height / 2.0)),
+        );
+        let clipped = painter.with_clip_rect(r.intersect(rect));
+        crate::tiles::draw_tilemap(tilemap, doc, &clipped, &xf, ctx);
+    }
+}
+
 /// The tiles other than the current one (each with its own view, clipped to it), then the
 /// tile borders: thin, and heavy around the current tile.
-fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
+fn draw_tiles(app: &mut CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
     let t = Tokens::get();
     let bg = Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b());
     for (r, tile) in tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0) {
@@ -1904,6 +2246,11 @@ fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::Mode
         let xf = tile_xf(*r, tile);
         p.rect_filled(*r, 0.0, t.canvas);
         draw_grid(app, &p, &xf);
+        // This tile's own basemap, under its vectors: each split viewport
+        // draws its own `tiles_for_view`, never the active tile's.
+        if let Ok(doc) = app.session.doc() {
+            crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &p, &xf, ui.ctx());
+        }
         if let Some(list) = &app.canvas.list {
             draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
         }
@@ -2625,6 +2972,34 @@ mod hatch_pick_tests {
         assert_eq!(super::hatch_at(&app, Vec2::new(5.0, 5.0), 10.0).map(|h| h.hex()), Some(hx));
         assert_eq!(super::hatch_at(&app, Vec2::new(25.0, 0.0), 10.0), None, "a line is not a hatch");
         assert_eq!(super::hatch_at(&app, Vec2::new(60.0, 60.0), 10.0), None);
+    }
+
+    #[test]
+    fn double_clicking_a_dimension_opens_its_properties_panel() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        let dh =
+            app.session.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [10, 0], "at": [5, -2] })).unwrap()["handle"].as_str().unwrap().to_string();
+        let _ = app.session.zoom_extents();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
+        let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
+            app.logic(&ctx);
+            let input = egui::RawInput { screen_rect: screen, events, time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| app.ui(ui));
+            out.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new(), 0.0);
+        // On the dimension line, mid-span.
+        let at = app.canvas.xf.unwrap().to_screen(Vec2::new(5.0, -2.0));
+        let button =
+            |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::default() };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)], 0.1);
+        frame(&mut app, vec![button(true), button(false)], 0.2);
+        frame(&mut app, vec![button(true), button(false)], 0.3);
+        frame(&mut app, Vec::new(), 0.4);
+        assert_eq!(app.session.selection().iter().map(|h| h.hex()).collect::<Vec<_>>(), vec![dh]);
+        assert!(app.session.log.iter().any(|l| l.contains("属性面板")), "no properties hint in {:?}", app.session.log);
+        assert!(app.session.running.is_none(), "double-click starts no command");
     }
 
     #[test]

@@ -9,6 +9,8 @@ use egui_kittest::kittest::Queryable;
 
 fn harness(width: f32, height: f32, scale: f32, message: bool) -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    // These tests locate widgets by their English labels; the out-of-box default is Chinese.
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("new", serde_json::json!({})).unwrap();
     app.ui.start_tab = false;
     app.ui.in_window_menu = false;
