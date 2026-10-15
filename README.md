@@ -279,6 +279,8 @@ See [ROADMAP.md](ROADMAP.md) for the stage, measured parity and the estimate of 
 
 **Download CADCraft** from GitHub: the [latest release](https://github.com/storytold/cadcraft/releases/latest) has every build listed below, and [all releases](https://github.com/storytold/cadcraft/releases) has earlier versions and their notes. `<ver>` in the file names is the version number, and `SHA256SUMS.txt` lists a checksum for every file.
 
+> **Fork note (dujianhua200/cadcraft):** releases built from this fork are **unsigned** — the macOS `.dmg` is ad-hoc signed, not notarized (first launch: right-click the app → Open), and the Windows `.msi`/`.zip` are unsigned (SmartScreen warns on first run). Get them from this fork's [Releases](https://github.com/dujianhua200/cadcraft/releases) page, not upstream's.
+
 ### Windows
 
 | Build | Installer | Portable |
