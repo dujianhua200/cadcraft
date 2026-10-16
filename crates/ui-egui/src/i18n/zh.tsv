@@ -1358,6 +1358,16 @@ menu	View	视图
 	OviMap	OviMap
 	OviMap GeoJSON…	OviMap GeoJSON…
 	OviMap…	OviMap…
+# 一键在线地图（工具栏按钮 + 中心点对话框 + 状态提示）。
+	Online Map	在线地图
+	The drawing has no geographic reference. Confirm the map centre below to align the online map.	图纸没有地理参照。请在下方确认地图中心点，以对齐在线地图。
+	Latitude	纬度
+	Longitude	经度
+	Online map on	在线地图已开启
+	Online map off	在线地图已关闭
+	Online map: no tiles yet, check the network	在线地图：暂无瓦片，请检查网络
+	Invalid latitude or longitude	纬度或经度无效
+	Open or create a drawing first	请先打开或新建图纸
 	Set Georef…	设置地理参照…
 	Set OviMap Georef…	设置 OviMap 地理参照…
 	Tilemap…	瓦片底图…

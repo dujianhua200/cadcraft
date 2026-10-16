@@ -1351,3 +1351,13 @@
 	Set Georef…	Встановити геоприв'язку…
 	Set OviMap Georef…	Встановити геоприв'язку OviMap…
 	Tilemap…	Підкладка з тайлів…
+# One-click online map (toolbar button + centre dialog + status hint).
+	Online Map	Онлайн-карта
+	The drawing has no geographic reference. Confirm the map centre below to align the online map.	У кресленні немає географічної прив'язки. Підтвердьте центр карти нижче, щоб вирівняти онлайн-карту.
+	Latitude	Широта
+	Longitude	Довгота
+	Online map on	Онлайн-карту ввімкнено
+	Online map off	Онлайн-карту вимкнено
+	Online map: no tiles yet, check the network	Онлайн-карта: плиток ще немає, перевірте мережу
+	Invalid latitude or longitude	Недійсна широта або довгота
+	Open or create a drawing first	Спочатку відкрийте або створіть креслення

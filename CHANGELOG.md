@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-16
+
+### Added
+
+- One-click online map: a toolbar "在线地图" toggle (Tools ▸ OviMap ▸
+  Online Map) turns the basemap tile layer on and off with a single
+  click. When the drawing has no georeference, a centre-point dialog
+  asks for confirmation (default: Xinyang 32.1301, 114.0814) and writes
+  the georeference before turning the layer on; invalid input is
+  reported inline without closing the dialog. No network / no tiles
+  shows a blank placeholder plus a one-line status-bar note, never a
+  popup error. Attribution stays in the status bar
+  (© OpenStreetMap 贡献者).
+
 ## [0.8.0] - 2026-10-14
 
 OviMap link: the basemap goes online, attribution is complete, and the
