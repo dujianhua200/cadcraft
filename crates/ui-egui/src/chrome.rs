@@ -30,6 +30,7 @@ const TOOLBAR: &[&[(Icon, &str, &str, Option<&str>)]] = &[
         (Icon::Share, "share", "Share", None),
     ],
     &[(Icon::ZoomWindow, "zoom.window", "Zoom Window", None), (Icon::Pan, "pan", "Pan", None), (Icon::Orbit, "3dorbit", "Orbit", None)],
+    &[(Icon::Map, "ui.toggle.basemap", "Online Map", None)],
     &[
         (Icon::ZoomExtents, "zoom.extents", "Zoom Extents", None),
         (Icon::Properties, "ui.toggle.palettes", "Properties", None),
@@ -123,6 +124,13 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                 for (icon, cmd, label, shortcut) in group.iter() {
                     let br = Rect::from_min_size(pos2(x, row.center().y - size / 2.0), vec2(size, size));
                     let resp = ui.interact(br, ui.id().with(("tb", *cmd)), Sense::click());
+                    // The one-click online map button shows its state: highlighted
+                    // while the basemap draws, plain while it is off.
+                    let basemap_on = *cmd == "ui.toggle.basemap" && app.session.doc().is_ok_and(cadcraft_doc::gis::basemap_visible);
+                    if basemap_on {
+                        ui.painter().rect_filled(br, 3.0, t.toggle_on.gamma_multiply(0.35));
+                        ui.painter().hline(br.x_range().shrink(4.0), br.bottom() - 1.0, Stroke::new(1.5, t.toggle_on));
+                    }
                     if resp.hovered() {
                         ui.painter().rect_filled(br, 3.0, t.control_hover.gamma_multiply(0.6));
                     }
@@ -131,7 +139,7 @@ pub fn title_and_toolbar(app: &mut CadApp, ui: &mut egui::Ui) {
                         Some(sc) => format!("{} ({})", crate::i18n::t(label), crate::menus::shortcut_label(sc, mac)),
                         None => crate::i18n::t(label).to_string(),
                     };
-                    icons::describe_control(ui, &resp, &tip, None, false);
+                    icons::describe_control(ui, &resp, &tip, if *cmd == "ui.toggle.basemap" { Some(basemap_on) } else { None }, false);
                     if resp.on_hover_text(tip).clicked() {
                         clicked = Some(*cmd);
                     }
@@ -490,14 +498,24 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
                 left += gw + 12.0;
             }
         }
+        // One-click online map, on but still showing nothing: the canvas
+        // keeps its blank placeholder, and this one-line hint says why
+        // instead of staying silent. It yields to a transient status
+        // message and to the coordinates otherwise.
+        let basemap_note = app
+            .session
+            .doc()
+            .ok()
+            .filter(|doc| cadcraft_doc::gis::basemap_visible(doc) && app.canvas.tilemap.has_failures() && app.canvas.tilemap.texture_count() == 0)
+            .map(|_| crate::tl!("Online map: no tiles yet, check the network").to_string());
         // A transient message occupies the same bounded readout slot as coordinates.
         // Ellipsis and a tooltip keep either value readable without covering layout tabs.
         let message = app.status.as_ref().filter(|(_, at)| crate::now_ms() - at < 5000.0).map(|(message, _)| message);
-        let readout = message.cloned().or(coord);
+        let readout = message.cloned().or(basemap_note.clone()).or(coord);
         if let Some(text) = readout {
             let width = (coord_right - left).max(0.0);
             if width > 4.0 {
-                let color = if message.is_some() { t.warn } else { t.text };
+                let color = if message.is_some() || basemap_note.is_some() { t.warn } else { t.text };
                 let mut job = egui::text::LayoutJob::simple_singleline(text.clone(), crate::theme::body(), color);
                 job.wrap.max_width = width;
                 job.wrap.max_rows = 1;
@@ -630,6 +648,11 @@ mod tests {
         // A short title is centred; one too wide for that starts after the lights.
         assert_eq!(title_left(100.0, 1000.0, 200.0), 500.0);
         assert_eq!(title_left(100.0, 900.0, 800.0), 100.0 + MAC_CONTENT_LEFT);
+    }
+
+    #[test]
+    fn toolbar_has_a_one_click_online_map_button() {
+        assert!(TOOLBAR.iter().flat_map(|group| group.iter()).any(|(icon, cmd, _, _)| *cmd == "ui.toggle.basemap" && matches!(*icon, Icon::Map)));
     }
 
     #[test]

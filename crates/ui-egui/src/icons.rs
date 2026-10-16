@@ -141,6 +141,7 @@ pub enum Icon {
     Distance,
     Area,
     List,
+    Map,
     PickAdd,
     SelectObjects,
     QuickSelect,
@@ -904,6 +905,15 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, dim: bool) {
             // A filter funnel with a spark.
             pen.poly(&[(3.0, 4.0), (19.0, 4.0), (13.0, 11.0), (13.0, 19.0), (9.0, 17.0), (9.0, 11.0)], true, b);
             pen.poly(&[(20.0, 10.0), (16.5, 15.5), (20.0, 15.5), (17.0, 21.0)], false, a);
+        }
+        Map => {
+            // A folded map with a pin: outline, two fold creases, pin head + point.
+            pen.poly(&[(3.0, 5.0), (21.0, 5.0), (21.0, 19.0), (3.0, 19.0)], true, b);
+            pen.l(9.0, 5.0, 8.0, 19.0);
+            pen.l(15.0, 5.0, 16.0, 19.0);
+            pen.c(12.0, 9.5, 2.8, a);
+            pen.tri([(12.0, 16.0), (10.2, 11.8), (13.8, 11.8)], a);
+            pen.fill_c(12.0, 9.5, 1.0, a);
         }
     }
 }

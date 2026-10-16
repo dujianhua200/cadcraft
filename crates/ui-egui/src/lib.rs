@@ -10,6 +10,7 @@
 
 pub mod animation;
 pub mod autosave;
+pub mod basemap;
 pub mod bedit;
 pub mod canvas;
 pub mod chrome;
@@ -245,6 +246,9 @@ pub struct CadApp {
     pub hatch_dlg: Option<hatchdlg::HatchDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
+    /// Draft latitude/longitude while the one-click online map's centre
+    /// dialog is open ([`basemap`]); `None` when it is closed.
+    pub basemap_georef: Option<basemap::GeorefDraft>,
 }
 
 impl CadApp {
@@ -283,6 +287,7 @@ impl CadApp {
             gpu_notice: None,
             hatch_dlg: None,
             bedit: bedit::State::default(),
+            basemap_georef: None,
         }
     }
 
