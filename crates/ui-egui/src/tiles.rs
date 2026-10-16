@@ -41,8 +41,13 @@ pub struct TileCache {
 }
 
 impl TileCache {
-    /// Textures currently held (test support: a drawn tile lands here).
-    #[cfg(test)]
+    /// Whether any tile recently failed to load (the status bar's one-line
+    /// hint reads this; failures clear when a tile loads).
+    pub fn has_failures(&self) -> bool {
+        !self.failed.is_empty()
+    }
+
+    /// Decoded textures currently held (test support: a drawn tile lands here).
     pub fn texture_count(&self) -> usize {
         self.textures.len()
     }
