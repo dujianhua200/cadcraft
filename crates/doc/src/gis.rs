@@ -66,6 +66,14 @@ pub const PHOTO_TEXT_DY: f64 = -3.0;
 pub const DEFAULT_TILE_URL: &str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 /// Attribution shown with the default tile service (status bar, §9.2).
 pub const DEFAULT_TILE_ATTRIBUTION: &str = "© OpenStreetMap 贡献者";
+/// Fallback tile service, tried when the primary fails (§9.4): CARTO Voyager,
+/// served from a CDN and reachable from networks where the OSM default is not.
+/// Its data is OpenStreetMap data (© OpenStreetMap contributors, ODbL) with
+/// CARTO's rendering — never a proprietary map (no Gaode/Tianditu/Baidu/Tencent).
+pub const FALLBACK_TILE_URL: &str = "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png";
+/// Attribution for the fallback service: the OSM credit plus CARTO's, so tiles
+/// from either source are credited (CARTO requires both credits).
+pub const FALLBACK_TILE_ATTRIBUTION: &str = "© OpenStreetMap 贡献者 © CARTO";
 /// OSM copyright page (layer properties / about panel, §9.2).
 pub const TILE_COPYRIGHT_URL: &str = "https://www.openstreetmap.org/copyright";
 /// Full attribution for the layer-properties / about panel (§9.2).
@@ -279,10 +287,19 @@ pub struct TileLayer {
     pub enabled: bool,
     /// Highest zoom requested (never above 19 for the OSM default, §9.1).
     pub max_zoom: u32,
+    /// Fallback URL template, tried when the primary fails (§9.4). `None` = no
+    /// fallback. The OSM default falls back to CARTO Voyager (OSM data); a
+    /// custom primary keeps its fallback unless the user clears it.
+    #[serde(default)]
+    pub fallback_url_template: Option<String>,
+    /// Attribution for the fallback source (required when a fallback is set, §9.5).
+    #[serde(default)]
+    pub fallback_attribution: Option<String>,
 }
 
 impl TileLayer {
-    /// The default layer: OSM standard tiles with their attribution (§9.1).
+    /// The default layer: OSM standard tiles with their attribution (§9.1),
+    /// falling back to CARTO Voyager when OSM is unreachable (§9.4).
     pub fn default_osm() -> Self {
         TileLayer {
             url_template: DEFAULT_TILE_URL.into(),
@@ -290,6 +307,43 @@ impl TileLayer {
             opacity: 0.85,
             enabled: true,
             max_zoom: DEFAULT_TILE_MAX_ZOOM,
+            fallback_url_template: Some(FALLBACK_TILE_URL.into()),
+            fallback_attribution: Some(FALLBACK_TILE_ATTRIBUTION.into()),
+        }
+    }
+
+    /// The fallback layer, if one is configured: same settings, its own URL
+    /// and attribution, and no further fallback (no chains). `None` when the
+    /// fallback URL or its attribution is missing/empty.
+    pub fn fallback_layer(&self) -> Option<TileLayer> {
+        let url = self.fallback_url_template.as_deref().unwrap_or("").trim();
+        let attr = self.fallback_attribution.as_deref().unwrap_or("").trim();
+        if url.is_empty() || attr.is_empty() {
+            return None;
+        }
+        Some(TileLayer {
+            url_template: url.to_string(),
+            attribution: attr.to_string(),
+            opacity: self.opacity,
+            enabled: self.enabled,
+            max_zoom: self.max_zoom,
+            fallback_url_template: None,
+            fallback_attribution: None,
+        })
+    }
+
+    /// The attribution to display: the primary credit plus the fallback credit
+    /// when a fallback is configured, so tiles from either source are credited.
+    /// A fallback credit that already contains the primary credit (CARTO's
+    /// does) is shown on its own rather than duplicated.
+    pub fn display_attribution(&self) -> String {
+        match self.fallback_layer() {
+            Some(fb) => {
+                let p = self.attribution.trim();
+                let f = fb.attribution.trim();
+                if !p.is_empty() && !f.starts_with(p) { format!("{p} / {f}") } else { f.to_string() }
+            }
+            None => self.attribution.clone(),
         }
     }
 
@@ -316,6 +370,19 @@ impl TileLayer {
         }
         if self.max_zoom > 30 {
             return Err("瓦片最高级别须 ≤ 30".into());
+        }
+        if let Some(fb) = self.fallback_url_template.as_deref() {
+            if fb.trim().is_empty() {
+                return Err("备用瓦片 URL 模板为空（要清除备用源请用 TILEMAP 的 fallbackUrlTemplate 为空）".into());
+            }
+            for ph in ["{z}", "{x}", "{y}"] {
+                if !fb.contains(ph) {
+                    return Err(format!("备用瓦片 URL 模板缺少占位符 {ph}（须含 {{z}}/{{x}}/{{y}}）"));
+                }
+            }
+            if self.enabled && self.fallback_attribution.as_deref().unwrap_or("").trim().is_empty() {
+                return Err("备用瓦片源必须填写署名（署名为空时拒绝启用）".into());
+            }
         }
         Ok(())
     }
@@ -1421,6 +1488,36 @@ mod tests {
         let mut bad = TileLayer::default_osm();
         bad.url_template = "https://example.com/tiles.png".into();
         assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn tile_fallback_default_and_validation() {
+        // The OSM default carries the CARTO fallback (OSM data, CDN-served).
+        let layer = TileLayer::default_osm();
+        let fb = layer.fallback_layer().expect("the default has a fallback");
+        assert_eq!(fb.url_template, FALLBACK_TILE_URL);
+        assert_eq!(fb.attribution, FALLBACK_TILE_ATTRIBUTION);
+        assert!(fb.fallback_layer().is_none(), "no fallback chains");
+        // Displayed attribution credits both sources without duplicating OSM.
+        assert_eq!(layer.display_attribution(), "© OpenStreetMap 贡献者 © CARTO");
+        // A fallback without attribution is refused; a fallback without
+        // placeholders is refused; clearing it is valid.
+        let mut bad = TileLayer::default_osm();
+        bad.fallback_attribution = Some(String::new());
+        assert!(bad.validate().unwrap_err().contains("署名"));
+        let mut bad = TileLayer::default_osm();
+        bad.fallback_url_template = Some("https://example.com/tiles.png".into());
+        assert!(bad.validate().is_err());
+        let mut cleared = TileLayer::default_osm();
+        cleared.fallback_url_template = None;
+        cleared.fallback_attribution = None;
+        assert!(cleared.validate().is_ok());
+        assert!(cleared.fallback_layer().is_none());
+        // A custom fallback's attribution joins the primary's.
+        let mut custom = TileLayer::default_osm();
+        custom.fallback_url_template = Some("https://example.com/{z}/{x}/{y}.png".into());
+        custom.fallback_attribution = Some("Example 贡献者".into());
+        assert_eq!(custom.display_attribution(), "© OpenStreetMap 贡献者 / Example 贡献者");
     }
 
     #[test]
