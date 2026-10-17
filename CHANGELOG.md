@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-16
+
+### Fixed
+
+- Text rendering: drawings that ask for SimSun / 宋体 now resolve to an
+  installed equivalent (Songti SC on macOS, SimSun itself on Windows)
+  instead of falling back to the single-stroke font. Previously ASCII
+  digits, letters and symbols rendered as hairline strokes while Chinese
+  characters rendered as filled outlines. Heiti / Kaiti / Fangsong get
+  the same treatment. SHX styles keep single-stroke rendering, which is
+  the correct equivalent behaviour for SHX fonts.
+
+- Online map in China: when the primary OSM tile source fails, the
+  fetcher now automatically tries the CARTO Voyager fallback
+  (`basemaps.cartocdn.com`, OSM data, ODbL). Tile fetching honours
+  `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`, and the tile
+  source is configurable through `TILEMAP` (`fallbackUrlTemplate` /
+  `fallbackAttribution`). The status bar shows the combined attribution
+  when fallback tiles are used.
+
 ## [0.9.0] - 2026-10-16
 
 ### Added

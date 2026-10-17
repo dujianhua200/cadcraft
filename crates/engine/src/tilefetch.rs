@@ -18,6 +18,17 @@
 //!   (7-day TTL, 500 MB LRU, atomic temp-file + rename writes). A failed fetch
 //!   falls back to a stale cached tile; a tile with no cache at all stays a
 //!   blank placeholder (§9.4) — a fetch failure never reaches the UI.
+//! * **Proxy**: the agent is built from ureq's default config, which reads
+//!   `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` (and `NO_PROXY`) from the
+//!   environment — launching the app with a proxy set routes tile requests
+//!   through it. A macOS system proxy set in System Settings is *not* picked
+//!   up (reading it needs platform APIs this crate cannot call); export the
+//!   proxy variables when launching the app instead.
+//! * **Fallback**: when the primary source fails (any failure: timeout,
+//!   connection error, 4xx, non-image body), the layer's fallback source —
+//!   CARTO Voyager for the OSM default, OSM data on a CDN — is tried with
+//!   the same policy, under its own cache directory. Only when both fail
+//!   does the tile stay a blank placeholder.
 //! * **Retries**: at most [`FetchOptions::max_attempts`] attempts per tile,
 //!   exponential back-off between attempts. 4xx (other than 429), a
 //!   non-image content type and an oversize body are permanent: no retry.
@@ -175,7 +186,28 @@ fn fetch_once(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, FetchFailure> {
 /// and on failure fall back to a stale cached tile. `None` only when there is
 /// no tile to show (cache miss + fetch failure) — the caller draws a blank
 /// placeholder (§9.4). Never fails, never panics.
+///
+/// Primary and fallback are tried in order, each cache-first under its own
+/// cache directory: a fallback tile is stored under the fallback source, so
+/// the two sources never overwrite each other. Stale fallbacks cover the
+/// same way: a stale primary tile wins over a fresh fallback fetch (same
+/// style as the rest of the view), and a stale fallback tile is the last
+/// resort before blank.
 pub fn fetch_tile_cached(layer: &TileLayer, tile: &TileRef, opts: FetchOptions) -> Option<Vec<u8>> {
+    if let Some(bytes) = fetch_one_cached(layer, tile, opts) {
+        return Some(bytes);
+    }
+    if let Some(fb) = layer.fallback_layer()
+        && let Some(bytes) = fetch_one_cached(&fb, tile, opts)
+    {
+        return Some(bytes);
+    }
+    crate::tilemap::load_cached_tile_with_fallback(layer, tile)
+}
+
+/// One source's cache-first fetch: fresh cache, else fetch + store, else `None`
+/// (the caller tries the next source or the stale cache).
+fn fetch_one_cached(layer: &TileLayer, tile: &TileRef, opts: FetchOptions) -> Option<Vec<u8>> {
     if let Some(bytes) = cadcraft_io::geojson::tile_cache_load(layer, tile) {
         return Some(bytes);
     }
@@ -184,7 +216,7 @@ pub fn fetch_tile_cached(layer: &TileLayer, tile: &TileRef, opts: FetchOptions) 
             let _ = cadcraft_io::geojson::tile_cache_store(layer, tile, &bytes);
             Some(bytes)
         }
-        Err(_) => crate::tilemap::load_cached_tile(layer, tile),
+        Err(_) => None,
     }
 }
 

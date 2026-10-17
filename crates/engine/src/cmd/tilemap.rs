@@ -13,8 +13,12 @@
 //! (anything but the OSM default URL) **must** carry a non-empty `attribution`
 //! in the same call (§9.5, never silently keep the OSM attribution for a
 //! foreign source); switching back to the OSM URL restores its attribution
-//! unless one is given. `{opacity: 0..=1, maxZoom?: 0..=30, zoom?: alias of
-//! maxZoom}` → settings. A custom source's `maxZoom` may exceed 19; the OSM
+//! and its CARTO fallback unless fallback params are given in the same call.
+//! `{fallbackUrlTemplate, fallbackAttribution?}` → set the fallback source
+//! (tried when the primary fails, §9.4): a non-empty fallback URL **must**
+//! carry a non-empty `fallbackAttribution` in the same call; an empty
+//! `fallbackUrlTemplate` clears the fallback. `{opacity: 0..=1,
+//! maxZoom?: 0..=30, zoom?: alias of maxZoom}` → settings. A custom source's `maxZoom` may exceed 19; the OSM
 //! default never requests above z=19 (`TileLayer::validate`).
 
 use cadcraft_doc::gis::{DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_MAX_ZOOM, DEFAULT_TILE_URL, TileLayer};
@@ -29,7 +33,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("tilemap", "Tilemap…", run_tilemap)
             .menu(&["Tools", "OviMap", "Tilemap…"])
             .params(
-                "{} → status; {enabled?: bool} on/off; {action?: on|off|status|reset}; {urlTemplate?, attribution? (custom source: required)}; {opacity?: 0..=1, maxZoom? | zoom?: 0..=30} → {tilemap, message, network}",
+                "{} → status; {enabled?: bool} on/off; {action?: on|off|status|reset}; {urlTemplate?, attribution? (custom source: required)}; {fallbackUrlTemplate?, fallbackAttribution? (fallback source: required when set; empty urlTemplate clears)}; {opacity?: 0..=1, maxZoom? | zoom?: 0..=30} → {tilemap, message, network}",
             )
             .alias(&["tilemapset"])
             .noundo()
@@ -44,6 +48,9 @@ fn status(s: &Session) -> Result<Value> {
         "tilemap": {
             "url_template": layer.url_template,
             "attribution": layer.attribution,
+            "display_attribution": layer.display_attribution(),
+            "fallback_url_template": layer.fallback_url_template,
+            "fallback_attribution": layer.fallback_attribution,
             "opacity": layer.opacity,
             "enabled": layer.enabled,
             "max_zoom": layer.max_zoom,
@@ -58,7 +65,9 @@ fn tilemap_message(layer: &TileLayer) -> String {
     if !layer.enabled {
         "<Tilemap off>".to_string()
     } else if is_default_osm(layer) {
-        format!("<Tilemap on: OSM, 透明度 {}, 最高级别 {}>", layer.opacity, layer.max_zoom)
+        format!("<Tilemap on: OSM, 透明度 {}, 最高级别 {}，主源失败时自动试 CARTO 备用源>", layer.opacity, layer.max_zoom)
+    } else if layer.fallback_layer().is_some() {
+        format!("<Tilemap on: 自定义源 + 备用源, 透明度 {}, 最高级别 {}>", layer.opacity, layer.max_zoom)
     } else {
         format!("<Tilemap on: 自定义源, 透明度 {}, 最高级别 {}>", layer.opacity, layer.max_zoom)
     }
@@ -113,12 +122,41 @@ fn run_tilemap(s: &mut Session, p: &Value) -> Result<Value> {
         // source's higher cap must not leak into OSM requests.
         if template == DEFAULT_TILE_URL {
             layer.max_zoom = layer.max_zoom.min(DEFAULT_TILE_MAX_ZOOM);
+            if str_param(p, "fallbackUrlTemplate").is_none() {
+                // Switching back to OSM restores its CARTO fallback too, unless
+                // the caller sets a fallback explicitly in this same call.
+                let d = TileLayer::default_osm();
+                layer.fallback_url_template = d.fallback_url_template;
+                layer.fallback_attribution = d.fallback_attribution;
+            }
         }
         layer.url_template = template.to_string();
         changed = true;
     } else if let Some(a) = str_param(p, "attribution") {
         layer.attribution = a.trim().to_string();
         changed = true;
+    }
+    // Fallback switch: a non-empty fallback URL without its attribution in the
+    // same call is refused; an empty fallback URL clears the fallback.
+    if let Some(fb) = str_param(p, "fallbackUrlTemplate") {
+        let fb = fb.trim();
+        if fb.is_empty() {
+            layer.fallback_url_template = None;
+            layer.fallback_attribution = None;
+        } else {
+            match str_param(p, "fallbackAttribution") {
+                Some(a) if !a.trim().is_empty() => {
+                    layer.fallback_url_template = Some(fb.to_string());
+                    layer.fallback_attribution = Some(a.trim().to_string());
+                }
+                _ => {
+                    return Err(bad("tilemap", "备用瓦片源必须在同一次调用中提供非空 `fallbackAttribution`（署名必填，见 ovimap-link §9.5）"));
+                }
+            }
+        }
+        changed = true;
+    } else if str_param(p, "fallbackAttribution").is_some() {
+        return Err(bad("tilemap", "`fallbackAttribution` 须与 `fallbackUrlTemplate` 一起提供"));
     }
     if let Some(opacity) = p.get("opacity").and_then(Value::as_f64) {
         if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {

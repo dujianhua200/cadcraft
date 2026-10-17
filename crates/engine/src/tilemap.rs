@@ -58,6 +58,14 @@ pub fn load_cached_tile(layer: &TileLayer, tile: &TileRef) -> Option<Vec<u8>> {
     }
 }
 
+/// A cached tile from the primary source, else from the fallback source
+/// (§9.4): fallback tiles live under the fallback source's cache directory,
+/// so the canvas must look there too — otherwise a fetched fallback tile
+/// would never be drawn.
+pub fn load_cached_tile_with_fallback(layer: &TileLayer, tile: &TileRef) -> Option<Vec<u8>> {
+    load_cached_tile(layer, tile).or_else(|| layer.fallback_layer().and_then(|fb| load_cached_tile(&fb, tile)))
+}
+
 /// The drawing's effective tile layer: its stored `tilemap`, else the OSM
 /// default (§9.1). The default is enabled — a drawing with a georef shows the
 /// OSM basemap as soon as its cache has tiles; without a georef tiles have no
