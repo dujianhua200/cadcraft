@@ -105,6 +105,8 @@ fn layer_for(stub: &Stub) -> TileLayer {
         opacity: 1.0,
         enabled: true,
         max_zoom: 19,
+        fallback_url_template: None,
+        fallback_attribution: None,
     }
 }
 
@@ -245,4 +247,57 @@ fn fetcher_request_dedups_and_skips_fresh() {
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(stub.requests(), 1);
     cleanup_cache(&layer, &t);
+}
+
+fn layer_with_fallback(primary: &Stub, fallback: &Stub) -> TileLayer {
+    let mut layer = layer_for(primary);
+    layer.fallback_url_template = Some(format!("http://127.0.0.1:{}/{{z}}/{{x}}/{{y}}.png", fallback.port));
+    layer.fallback_attribution = Some("fallback 贡献者".into());
+    layer
+}
+
+#[test]
+fn fetch_falls_back_when_primary_500s() {
+    let primary = Stub::new(|_| (500, "text/plain", b"boom".to_vec()));
+    let fallback = Stub::new(|_| (200, "image/png", PNG_1X1.to_vec()));
+    let layer = layer_with_fallback(&primary, &fallback);
+    let t = tile(&layer);
+    let bytes = fetch_tile_cached(&layer, &t, fast_opts()).expect("the fallback serves the tile");
+    assert_eq!(bytes, PNG_1X1);
+    assert_eq!(primary.requests(), 3, "the primary is retried first");
+    assert_eq!(fallback.requests(), 1, "then the fallback is tried once and serves");
+    // The fallback tile is cached under the fallback source's directory, not
+    // the primary's — the two sources never overwrite each other.
+    let fb_layer = layer.fallback_layer().expect("fallback configured");
+    assert_eq!(cadcraft_io::geojson::tile_cache_load(&fb_layer, &t).as_deref(), Some(PNG_1X1));
+    assert!(cadcraft_io::geojson::tile_cache_load(&layer, &t).is_none(), "nothing cached under the primary");
+    cleanup_cache(&layer, &t);
+    cleanup_cache(&fb_layer, &t);
+}
+
+#[test]
+fn fetch_falls_back_when_primary_404s() {
+    let primary = Stub::new(|_| (404, "text/plain", b"no such tile".to_vec()));
+    let fallback = Stub::new(|_| (200, "image/png", PNG_1X1.to_vec()));
+    let layer = layer_with_fallback(&primary, &fallback);
+    let t = tile(&layer);
+    let bytes = fetch_tile_cached(&layer, &t, fast_opts()).expect("a permanent primary failure still tries the fallback");
+    assert_eq!(bytes, PNG_1X1);
+    assert_eq!(primary.requests(), 1, "a 404 is permanent: no retry before the fallback");
+    assert_eq!(fallback.requests(), 1);
+    cleanup_cache(&layer, &t);
+    cleanup_cache(&layer.fallback_layer().expect("fallback configured"), &t);
+}
+
+#[test]
+fn fetch_both_sources_failing_stays_blank() {
+    let primary = Stub::new(|_| (500, "text/plain", b"boom".to_vec()));
+    let fallback = Stub::new(|_| (500, "text/plain", b"boom".to_vec()));
+    let layer = layer_with_fallback(&primary, &fallback);
+    let t = tile(&layer);
+    assert!(fetch_tile_cached(&layer, &t, fast_opts()).is_none(), "both sources down: blank placeholder");
+    assert_eq!(primary.requests(), 3);
+    assert_eq!(fallback.requests(), 3);
+    cleanup_cache(&layer, &t);
+    cleanup_cache(&layer.fallback_layer().expect("fallback configured"), &t);
 }

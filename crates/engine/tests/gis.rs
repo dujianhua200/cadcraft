@@ -539,6 +539,17 @@ fn tilemap_command_json() {
     assert_eq!(custom["tilemap"]["url_template"], "https://example.com/{z}/{x}/{y}.png");
     assert_eq!(custom["tilemap"]["attribution"], "Example 贡献者");
     assert_eq!(custom["tilemap"]["default_osm"], false);
+    // Fallback (§9.4): a fallback URL without its attribution is refused; an
+    // attribution alone is refused; set + clear round-trip.
+    assert!(s.execute("tilemap", &json!({ "fallbackUrlTemplate": "https://fallback.example/{z}/{x}/{y}.png" })).is_err());
+    assert!(s.execute("tilemap", &json!({ "fallbackAttribution": "Fallback 贡献者" })).is_err());
+    let fb = s
+        .execute("tilemap", &json!({ "fallbackUrlTemplate": "https://fallback.example/{z}/{x}/{y}.png", "fallbackAttribution": "Fallback 贡献者" }))
+        .unwrap();
+    assert_eq!(fb["tilemap"]["fallback_url_template"], "https://fallback.example/{z}/{x}/{y}.png");
+    assert_eq!(fb["tilemap"]["display_attribution"], "Example 贡献者 / Fallback 贡献者");
+    let cleared = s.execute("tilemap", &json!({ "fallbackUrlTemplate": "" })).unwrap();
+    assert!(cleared["tilemap"]["fallback_url_template"].is_null(), "an empty fallback URL clears the fallback");
     // A custom source may set maxZoom above 19; switching back to OSM restores
     // its attribution and re-applies the z≤19 cap.
     let z = s.execute("tilemap", &json!({ "maxZoom": 22 })).unwrap();
@@ -547,6 +558,10 @@ fn tilemap_command_json() {
     let back = s.execute("tilemap", &json!({ "urlTemplate": "https://tile.openstreetmap.org/{z}/{x}/{y}.png" })).unwrap();
     assert_eq!(back["tilemap"]["attribution"], "© OpenStreetMap 贡献者");
     assert_eq!(back["tilemap"]["max_zoom"], 19, "switching back to OSM re-applies the z≤19 cap");
+    assert_eq!(
+        back["tilemap"]["fallback_url_template"], "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+        "switching back to OSM restores its CARTO fallback"
+    );
     let reset = s.execute("tilemap", &json!({ "action": "reset" })).unwrap();
     assert_eq!(reset["tilemap"]["max_zoom"], 19);
     assert_eq!(reset["tilemap"]["opacity"], 0.85);

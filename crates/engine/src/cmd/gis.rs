@@ -524,7 +524,7 @@ fn run_inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "counts": { "marker": markers.len(), "track": tracks.len(), "label": labels.len(), "photo": photos.len(), "entities": entities },
         "missingPhotos": missing,
         "warnings": warnings,
-        "tilemap": { "url_template": tilemap.url_template, "attribution": tilemap.attribution, "opacity": tilemap.opacity, "enabled": tilemap.enabled, "max_zoom": tilemap.max_zoom },
+        "tilemap": { "url_template": tilemap.url_template, "attribution": tilemap.attribution, "display_attribution": tilemap.display_attribution(), "fallback_url_template": tilemap.fallback_url_template, "fallback_attribution": tilemap.fallback_attribution, "opacity": tilemap.opacity, "enabled": tilemap.enabled, "max_zoom": tilemap.max_zoom },
     }))
 }
 

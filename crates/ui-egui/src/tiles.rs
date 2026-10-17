@@ -25,7 +25,7 @@ use std::time::Instant;
 use cadcraft_doc::Drawing;
 use cadcraft_doc::gis::{TILE_ATTRIBUTION_FULL, TILE_COPYRIGHT_URL, tile_backoff_delay_ms, tile_cache_rel_path, tile_placements};
 use cadcraft_engine::tilefetch::TileFetcher;
-use cadcraft_engine::tilemap::{effective_tilemap, is_default_osm, load_cached_tile};
+use cadcraft_engine::tilemap::{effective_tilemap, is_default_osm, load_cached_tile_with_fallback};
 use cadcraft_geom::Vec2;
 use cadcraft_render::TileImage;
 use egui::{Color32, ColorImage, Mesh, Painter, Pos2, TextureFilter, TextureHandle, TextureOptions};
@@ -58,12 +58,14 @@ impl TileCache {
 /// needs more than a few dozen).
 const MAX_TEXTURES: usize = 256;
 
-/// The attribution to show in the status bar (§9.2): the layer's attribution
-/// when tiles are enabled, `None` when they are off (the attribution hides
-/// with the tiles). A custom source's attribution is shown verbatim.
+/// The attribution to show in the status bar (§9.2): the layer's display
+/// attribution (primary + fallback credit when a fallback is configured, so
+/// tiles from either source are credited) when tiles are enabled, `None`
+/// when they are off (the attribution hides with the tiles). A custom
+/// source's attribution is shown verbatim.
 pub fn attribution(doc: &Drawing) -> Option<String> {
     let layer = effective_tilemap(doc);
-    if layer.enabled && !layer.attribution.trim().is_empty() { Some(layer.attribution.clone()) } else { None }
+    if layer.enabled && !layer.display_attribution().trim().is_empty() { Some(layer.display_attribution()) } else { None }
 }
 
 /// The full attribution for the layer-properties / about panel (§9.2): the
@@ -120,7 +122,7 @@ pub fn draw_tilemap(cache: &mut TileCache, doc: &Drawing, painter: &Painter, xf:
         cache.textures.clear();
         ctx.request_repaint();
     }
-    draw_tilemap_with_hook(cache, doc, painter, xf, ctx, &|layer, tile| load_cached_tile(layer, tile), &|layer, tile| {
+    draw_tilemap_with_hook(cache, doc, painter, xf, ctx, &|layer, tile| load_cached_tile_with_fallback(layer, tile), &|layer, tile| {
         TileFetcher::global().request(layer, tile);
     });
 }
@@ -224,8 +226,9 @@ mod tests {
     #[test]
     fn tilemap_attribution_hides_with_tiles() {
         let mut d = Drawing::new_metric();
-        // No stored layer → the OSM default, enabled, with its attribution.
-        assert_eq!(attribution(&d), Some("© OpenStreetMap 贡献者".to_string()));
+        // No stored layer → the OSM default, enabled, with the combined
+        // attribution (primary OSM + CARTO fallback, both credited).
+        assert_eq!(attribution(&d), Some("© OpenStreetMap 贡献者 © CARTO".to_string()));
         d.tilemap = Some(TileLayer { enabled: false, ..TileLayer::default_osm() });
         assert_eq!(attribution(&d), None, "attribution hides with the tiles (§9.2)");
         d.tilemap = Some(TileLayer {
@@ -234,6 +237,8 @@ mod tests {
             opacity: 1.0,
             enabled: true,
             max_zoom: 19,
+            fallback_url_template: None,
+            fallback_attribution: None,
         });
         assert_eq!(attribution(&d), Some("Example 贡献者".to_string()), "a custom source's attribution shows verbatim");
     }
@@ -317,6 +322,8 @@ mod tests {
             opacity: 1.0,
             enabled: true,
             max_zoom: 19,
+            fallback_url_template: None,
+            fallback_attribution: None,
         });
         assert_eq!(
             attribution_full(&custom),

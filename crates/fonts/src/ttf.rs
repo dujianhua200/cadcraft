@@ -496,6 +496,42 @@ fn is_stroke_name(k: &str) -> bool {
     k.is_empty() || k.ends_with(".shx") || k == crate::BUILTIN_FONT.to_ascii_lowercase() || k == "txt" || k == "simplex" || k == "romans"
 }
 
+/// Well-known font names and the installed equivalents to try when the named
+/// font is missing. A drawing that asks for SimSun (the Windows Song font) opens
+/// on macOS as Songti SC, and vice versa; without this, the style falls back to
+/// the single-stroke font, so ASCII renders as hairline strokes while CJK
+/// renders as filled fallback outlines — the "only Chinese looks right" split.
+/// Keys and candidates are `key()`-normalised; the primary name is always tried
+/// first, so an installed SimSun still wins over its aliases.
+const FONT_ALIASES: &[(&str, &[&str])] = &[
+    ("simsun", &["songti sc", "stsongti", "songti", "noto serif cjk sc", "source han serif sc"]),
+    ("宋体", &["songti sc", "stsongti", "songti", "noto serif cjk sc", "source han serif sc"]),
+    ("stsong", &["songti sc", "stsongti", "songti", "noto serif cjk sc", "source han serif sc"]),
+    ("nsimsun", &["songti sc", "stsongti", "songti", "noto serif cjk sc", "source han serif sc"]),
+    ("simsun-extb", &["songti sc", "stsongti", "songti", "noto serif cjk sc", "source han serif sc"]),
+    ("songti sc", &["simsun", "stsong", "noto serif cjk sc", "source han serif sc"]),
+    ("stsongti", &["simsun", "stsong", "noto serif cjk sc", "source han serif sc"]),
+    ("songti", &["simsun", "stsong", "noto serif cjk sc", "source han serif sc"]),
+    ("simhei", &["heiti sc", "stheiti", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("黑体", &["heiti sc", "stheiti", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("stheiti", &["simhei", "heiti sc", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("heiti sc", &["simhei", "stheiti", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("simkai", &["kaiti sc", "stkaiti", "kaiti", "noto serif cjk sc", "source han serif sc"]),
+    ("楷体", &["kaiti sc", "stkaiti", "kaiti", "noto serif cjk sc", "source han serif sc"]),
+    ("stkaiti", &["simkai", "kaiti sc", "kaiti", "noto serif cjk sc", "source han serif sc"]),
+    ("kaiti sc", &["simkai", "stkaiti", "kaiti", "noto serif cjk sc", "source han serif sc"]),
+    ("simfang", &["stfangsong", "fangsong", "songti sc", "simsun"]),
+    ("仿宋", &["stfangsong", "fangsong", "songti sc", "simsun"]),
+    ("stfangsong", &["simfang", "fangsong", "songti sc", "simsun"]),
+];
+
+/// Installed-equivalent names for `k` (a `key()`-normalised name), if it is a
+/// well-known name with equivalents. Single-level: candidates are looked up
+/// directly, never re-aliased, so the chain cannot loop.
+fn alias_keys(k: &str) -> &'static [&'static str] {
+    FONT_ALIASES.iter().find(|(n, _)| *n == k).map(|(_, c)| *c).unwrap_or(&[])
+}
+
 /// A face of an installed (or registered) font by file name or family name. Stroke-font names
 /// (".shx", empty) return `None`.
 pub fn find(name: &str) -> Option<Face> {
@@ -504,15 +540,24 @@ pub fn find(name: &str) -> Option<Face> {
         return None;
     }
     let mut g = lock();
-    if let Some(r) = g.resolved.get(&k) {
-        return r.clone();
+    let aliases = alias_keys(&k);
+    for cand in std::iter::once(k).chain(aliases.iter().map(|s| s.to_string())) {
+        if let Some(r) = g.resolved.get(&cand) {
+            if r.is_some() {
+                return r.clone();
+            }
+            continue;
+        }
+        let r = g.lookup(&cand);
+        if g.resolved.len() >= MAX_CACHED_NAMES {
+            g.resolved.clear();
+        }
+        g.resolved.insert(cand, r.clone());
+        if r.is_some() {
+            return r;
+        }
     }
-    let r = g.lookup(&k);
-    if g.resolved.len() >= MAX_CACHED_NAMES {
-        g.resolved.clear();
-    }
-    g.resolved.insert(k, r.clone());
-    r
+    None
 }
 
 struct Prefs {
@@ -866,6 +911,55 @@ pub fn layout_line(face: &Face, s: &str, height: f64, width_factor: f64, oblique
 #[cfg(test)]
 mod family_tests {
     use super::*;
+
+    #[test]
+    fn alias_table_is_single_level_and_covers_the_four_families() {
+        // Every alias list is non-empty, never contains its own key (no self-loop),
+        // and the chain is single-level by construction (find() never re-aliases).
+        for (k, v) in FONT_ALIASES {
+            assert!(!v.is_empty(), "{k} has no aliases");
+            assert!(!v.contains(k), "{k} aliases to itself");
+        }
+        assert!(alias_keys("simsun").contains(&"songti sc"));
+        assert!(alias_keys("宋体").contains(&"songti sc"));
+        assert!(alias_keys("songti sc").contains(&"simsun"));
+        assert!(alias_keys("simhei").contains(&"heiti sc"));
+        assert!(alias_keys("黑体").contains(&"heiti sc"));
+        assert!(alias_keys("simkai").contains(&"kaiti sc"));
+        assert!(alias_keys("楷体").contains(&"kaiti sc"));
+        assert!(alias_keys("simfang").contains(&"stfangsong"));
+        assert!(alias_keys("仿宋").contains(&"stfangsong"));
+        assert!(alias_keys("arial").is_empty());
+        assert!(alias_keys("txt").is_empty());
+    }
+
+    /// A SimSun-styled drawing on a machine without SimSun (macOS) must resolve
+    /// to the installed Songti SC equivalent and shape ASCII as filled outlines,
+    /// not as single-stroke hairlines — the "only Chinese looks right" split.
+    #[test]
+    fn simsun_resolves_to_registered_songti_sc_and_shapes_ascii_as_outlines() {
+        let Ok(regular) = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") else { return };
+        let Ok(bold) = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf") else { return };
+        // (a) SimSun missing: the Songti SC equivalent answers.
+        crate::ttf::register("Songti SC", regular.clone());
+        let face = crate::ttf::find("SimSun").expect("SimSun should alias to Songti SC");
+        assert_eq!(face.bytes.as_slice(), regular.as_slice());
+        let face_cn = crate::ttf::find("宋体").expect("宋体 should alias to Songti SC");
+        assert_eq!(face_cn.bytes.as_slice(), regular.as_slice());
+        assert!(crate::TextFont::resolve("SimSun").is_outline(), "SimSun style must be an outline font");
+        // (b) An installed SimSun still wins over its aliases.
+        crate::ttf::register("SimSun", bold.clone());
+        crate::ttf::register("Songti SC", regular.clone());
+        let face = crate::ttf::find("SimSun").expect("installed SimSun");
+        assert_eq!(face.bytes.as_slice(), bold.as_slice());
+        // (c) ASCII shaped with the resolved face is filled outlines, not strokes.
+        let sh = crate::ttf::shape(&face, "GYTS-6B1", 1.0, 1.0, 0.0).expect("shape");
+        assert_eq!(sh.glyphs.len(), 8, "one filled outline per ASCII char");
+        assert!(sh.glyphs.iter().all(|g| !g.is_empty()), "every ASCII glyph has contours");
+        assert!(sh.strokes.is_empty(), "no stroke-font hairlines for ASCII");
+        let stroke = crate::shape_stroke("GYTS-6B1", 1.0, 1.0, 0.0);
+        assert!(!stroke.strokes.is_empty() && stroke.glyphs.is_empty(), "stroke font is the old broken path");
+    }
 
     #[test]
     fn a_family_is_looked_for_in_files_starting_with_its_first_word() {
