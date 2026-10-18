@@ -237,6 +237,7 @@ mod tests {
             opacity: 1.0,
             enabled: true,
             max_zoom: 19,
+            coord_type: cadcraft_doc::gis::CoordType::Wgs84,
             fallback_url_template: None,
             fallback_attribution: None,
         });
@@ -322,6 +323,7 @@ mod tests {
             opacity: 1.0,
             enabled: true,
             max_zoom: 19,
+            coord_type: cadcraft_doc::gis::CoordType::Wgs84,
             fallback_url_template: None,
             fallback_attribution: None,
         });

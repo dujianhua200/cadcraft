@@ -24,6 +24,7 @@ pub mod dcl_dialog;
 pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
+pub mod mapsources;
 mod mtext_editor;
 pub mod spacemouse;
 // The External References palette.
@@ -249,6 +250,12 @@ pub struct CadApp {
     /// Draft latitude/longitude while the one-click online map's centre
     /// dialog is open ([`basemap`]); `None` when it is closed.
     pub basemap_georef: Option<basemap::GeorefDraft>,
+    /// The tile-source library (the two built-ins plus the user's own
+    /// sources): persisted with the app config, restored at startup.
+    pub map_sources: cadcraft_doc::gis::MapSourceLibrary,
+    /// The Map Sources dialog's working draft ([`mapsources`]); `None` when
+    /// it is closed.
+    pub map_source_dialog: Option<mapsources::MapSourceDialog>,
 }
 
 impl CadApp {
@@ -288,6 +295,8 @@ impl CadApp {
             hatch_dlg: None,
             bedit: bedit::State::default(),
             basemap_georef: None,
+            map_sources: cadcraft_doc::gis::MapSourceLibrary::default(),
+            map_source_dialog: None,
         }
     }
 
@@ -376,6 +385,7 @@ impl CadApp {
             "interfaceLanguage": self.ui.interface_language.code(),
             "saveFormat": self.ui.save_format.as_str(),
             "saveVersion": self.ui.save_version,
+            "mapSources": self.map_sources.to_json(),
         });
         if self.spacemouse.settings != spacemouse::Settings::default() {
             prefs["spacemouse"] = json!(self.spacemouse.settings);
@@ -409,6 +419,9 @@ impl CadApp {
         }
         if let Some(files) = v.get("recentFiles").and_then(Value::as_array) {
             self.ui.recent_files = files.iter().filter_map(Value::as_str).filter(|p| !p.is_empty()).take(RECENT_FILES).map(str::to_string).collect();
+        }
+        if let Some(ms) = v.get("mapSources") {
+            self.map_sources = cadcraft_doc::gis::MapSourceLibrary::from_json(ms);
         }
     }
 
@@ -806,7 +819,14 @@ mod tests {
         frame(&mut a, &ctx, None);
         assert_eq!(Tokens::get(), Tokens::of(theme::SYSTEM_FALLBACK), "no OS appearance: the documented fallback");
         assert_eq!(a.ui.theme, ThemePref::System);
-        assert_eq!(a.prefs_json(), r#"{"animations":"system","interfaceLanguage":"zh","saveFormat":"dxf","saveVersion":"2018","theme":"system"}"#);
+        let lib = cadcraft_doc::gis::MapSourceLibrary::default();
+        assert_eq!(
+            a.prefs_json(),
+            format!(
+                r#"{{"animations":"system","interfaceLanguage":"zh","mapSources":{},"saveFormat":"dxf","saveVersion":"2018","theme":"system"}}"#,
+                lib.to_json()
+            )
+        );
     }
 
     #[test]
@@ -853,5 +873,27 @@ mod tests {
         assert_eq!(SaveFormat::Dwg.suggested_name(Some("  ")), "Drawing.dwg");
         let ui: UiState = serde_json::from_value(json!({ "saveFormat": "dwg" })).unwrap_or_default();
         assert_eq!(ui.save_format, SaveFormat::Dwg);
+    }
+
+    #[test]
+    fn map_sources_persist_across_restarts() {
+        let mut a = app();
+        // A user-added GCJ-02 source, made current, survives a prefs round trip.
+        let xml = r#"<customMapSource><mapID>demo</mapID><name>演示图源</name><coordType>Mercator(china)</coordType><url>https://tiles.example.com/{z}/{x}/{y}.png</url></customMapSource>"#;
+        let source = cadcraft_doc::gis::parse_ovi_custom_map_source(xml, "演示 贡献者").expect("valid XML");
+        a.map_sources.add(source).expect("add");
+        a.map_sources.set_current("demo").expect("set current");
+        let mut b = app();
+        b.load_prefs(&a.prefs_json());
+        assert_eq!(b.map_sources, a.map_sources);
+        assert_eq!(b.map_sources.current().id, "demo");
+        assert_eq!(b.map_sources.current().coord_type, cadcraft_doc::gis::CoordType::Gcj02);
+        // Bad prefs leave the defaults in place.
+        b.load_prefs(r#"{"mapSources": {"sources": [{"id": "x"}], "currentId": "missing"}}"#);
+        assert_eq!(b.map_sources.current().id, "osm");
+        // Opening the dialog from the menu seeds it from the library.
+        assert_eq!(b.run("ui.dialog.mapsources", json!(null)).ok(), Some(Value::Null));
+        assert!(b.map_source_dialog.is_some());
+        assert_eq!(b.map_source_dialog.as_ref().map(|d| d.library.current_id.clone()), Some("osm".to_string()));
     }
 }

@@ -32,6 +32,10 @@ use cadcraft_geom::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub use crate::map_source::{
+    CoordType, MapSource, MapSourceLibrary, expand_tile_template, gcj02_to_wgs84, parse_ovi_custom_map_source, validate_template_scheme_host,
+    validate_tile_template, wgs84_to_gcj02,
+};
 use crate::{Common, Drawing, EntityKind, LwPolyline, MText, Point, RawTag, Text};
 
 /// Registered application name of the OVIMAP xdata (and the APPID table entry).
@@ -287,6 +291,11 @@ pub struct TileLayer {
     pub enabled: bool,
     /// Highest zoom requested (never above 19 for the OSM default, §9.1).
     pub max_zoom: u32,
+    /// The coordinate frame the tiles are rendered in (§9.6): WGS-84
+    /// Mercator (no conversion) or GCJ-02 (`Mercator(china)`, display-only
+    /// conversion — stored coordinates stay WGS-84).
+    #[serde(default)]
+    pub coord_type: CoordType,
     /// Fallback URL template, tried when the primary fails (§9.4). `None` = no
     /// fallback. The OSM default falls back to CARTO Voyager (OSM data); a
     /// custom primary keeps its fallback unless the user clears it.
@@ -307,6 +316,7 @@ impl TileLayer {
             opacity: 0.85,
             enabled: true,
             max_zoom: DEFAULT_TILE_MAX_ZOOM,
+            coord_type: CoordType::Wgs84,
             fallback_url_template: Some(FALLBACK_TILE_URL.into()),
             fallback_attribution: Some(FALLBACK_TILE_ATTRIBUTION.into()),
         }
@@ -327,6 +337,10 @@ impl TileLayer {
             opacity: self.opacity,
             enabled: self.enabled,
             max_zoom: self.max_zoom,
+            // The fallback is the same source family (the OSM default's
+            // CARTO fallback is WGS-84, as is its primary), so it shares
+            // the primary's coordinate frame.
+            coord_type: self.coord_type,
             fallback_url_template: None,
             fallback_attribution: None,
         })
@@ -347,7 +361,8 @@ impl TileLayer {
         }
     }
 
-    /// Validate the layer: the template must carry `{z}`, `{x}` and `{y}`; a custom
+    /// Validate the layer: the template must carry `{z}`, `{x}` and `{y}` (or the
+    /// OviMap `{$z}` / `{$x}` / `{$y}` forms); a custom
     /// source must carry an attribution (§9.5); opacity must be in 0..=1; the OSM
     /// default never requests above z=19. Errors are in Chinese for the command line.
     pub fn validate(&self) -> Result<(), String> {
@@ -355,10 +370,12 @@ impl TileLayer {
             return Err("瓦片 URL 模板为空".into());
         }
         for ph in ["{z}", "{x}", "{y}"] {
-            if !self.url_template.contains(ph) {
-                return Err(format!("瓦片 URL 模板缺少占位符 {ph}（须含 {{z}}/{{x}}/{{y}}）"));
+            if !self.url_template.contains(ph) && !self.url_template.contains(&format!("{{${}}}", ph.trim_matches(|c| c == '{' || c == '}'))) {
+                return Err(format!("瓦片 URL 模板缺少占位符 {ph}（须含 {{z}}/{{x}}/{{y}} 或 {{$z}}/{{$x}}/{{$y}}）"));
             }
         }
+        // Scheme + host (http(s) only, no credentials in the URL).
+        validate_template_scheme_host(&self.url_template)?;
         if self.enabled && self.attribution.trim().is_empty() {
             return Err("自定义瓦片源必须填写署名（署名为空时拒绝启用）".into());
         }
@@ -368,6 +385,9 @@ impl TileLayer {
         if self.url_template.trim() == DEFAULT_TILE_URL && self.max_zoom > DEFAULT_TILE_MAX_ZOOM {
             return Err(format!("默认 OSM 瓦片最高级别为 {DEFAULT_TILE_MAX_ZOOM}，不得请求更高级别"));
         }
+        if self.url_template.trim() == DEFAULT_TILE_URL && self.coord_type != CoordType::Wgs84 {
+            return Err("默认 OSM 瓦片为 WGS84，不可设为 Mercator(china)".into());
+        }
         if self.max_zoom > 30 {
             return Err("瓦片最高级别须 ≤ 30".into());
         }
@@ -376,10 +396,11 @@ impl TileLayer {
                 return Err("备用瓦片 URL 模板为空（要清除备用源请用 TILEMAP 的 fallbackUrlTemplate 为空）".into());
             }
             for ph in ["{z}", "{x}", "{y}"] {
-                if !fb.contains(ph) {
-                    return Err(format!("备用瓦片 URL 模板缺少占位符 {ph}（须含 {{z}}/{{x}}/{{y}}）"));
+                if !fb.contains(ph) && !fb.contains(&format!("{{${}}}", ph.trim_matches(|c| c == '{' || c == '}'))) {
+                    return Err(format!("备用瓦片 URL 模板缺少占位符 {ph}（须含 {{z}}/{{x}}/{{y}} 或 {{$z}}/{{$x}}/{{$y}}）"));
                 }
             }
+            validate_template_scheme_host(fb).map_err(|e| format!("备用{e}"))?;
             if self.enabled && self.fallback_attribution.as_deref().unwrap_or("").trim().is_empty() {
                 return Err("备用瓦片源必须填写署名（署名为空时拒绝启用）".into());
             }
@@ -387,9 +408,10 @@ impl TileLayer {
         Ok(())
     }
 
-    /// Expand the template for one tile.
+    /// Expand the template for one tile (OviMap `{$x}` / `{$s}` /
+    /// `{$Galileo}` forms included).
     pub fn tile_url(&self, z: u32, x: u32, y: u32) -> String {
-        self.url_template.replace("{z}", &z.to_string()).replace("{x}", &x.to_string()).replace("{y}", &y.to_string())
+        expand_tile_template(&self.url_template, z, x, y)
     }
 
     /// Cache file name for one tile: `z/x/y.<ext>` (extension from the template, else png).
@@ -437,6 +459,15 @@ pub fn tiles_for_view(layer: &TileLayer, min: Vec2, max: Vec2, georef: &GeoRef, 
     }
     let (lon0, lat0) = georef.unproject(min).ok_or_else(|| "视图左下角超出投影范围".to_string())?;
     let (lon1, lat1) = georef.unproject(max).ok_or_else(|| "视图右上角超出投影范围".to_string())?;
+    // A GCJ-02 source's tiles are indexed in GCJ-02: convert the view
+    // bounds (WGS-84) to the source frame before tile lookup (display-only).
+    let (lon0, lat0, lon1, lat1) = if layer.coord_type == CoordType::Gcj02 {
+        let (a_lat, a_lon) = wgs84_to_gcj02(lat0, lon0);
+        let (b_lat, b_lon) = wgs84_to_gcj02(lat1, lon1);
+        (a_lon, a_lat, b_lon, b_lat)
+    } else {
+        (lon0, lat0, lon1, lat1)
+    };
     let (lon_min, lon_max) = (lon0.min(lon1), lon0.max(lon1));
     let (lat_min, lat_max) = (lat0.min(lat1), lat0.max(lat1));
     let count_at = |z: u32| -> Option<usize> {
@@ -500,14 +531,35 @@ pub struct TilePlacement {
     pub corners: [Vec2; 4],
 }
 
-/// The CAD corners of one tile: its WGS-84 corners through the georef (§9.3).
+/// The CAD corners of one tile: its corners through the georef (§9.3). A
+/// GCJ-02 source's tile bounds are in GCJ-02, so each corner is converted
+/// back to WGS-84 first (display-only); WGS-84 sources project directly.
 /// `None` when a corner fails to project.
 pub fn tile_corners(tile: &TileRef, georef: &GeoRef) -> Option<[Vec2; 4]> {
+    tile_corners_for_layer(tile, georef, CoordType::Wgs84)
+}
+
+/// [`tile_corners`] for a tile of a layer with the given coordinate type.
+pub fn tile_corners_for_layer(tile: &TileRef, georef: &GeoRef, coord_type: CoordType) -> Option<[Vec2; 4]> {
     let (lon_min, lat_min, lon_max, lat_max) = tile_bounds_lonlat(tile.z, tile.x, tile.y)?;
-    let nw = georef.project(lon_min, lat_max)?;
-    let ne = georef.project(lon_max, lat_max)?;
-    let se = georef.project(lon_max, lat_min)?;
-    let sw = georef.project(lon_min, lat_min)?;
+    let to_wgs84 = |lon: f64, lat: f64| -> (f64, f64) {
+        if coord_type == CoordType::Gcj02 {
+            let (w_lat, w_lon) = gcj02_to_wgs84(lat, lon);
+            (w_lon, w_lat)
+        } else {
+            (lon, lat)
+        }
+    };
+    // Each corner is converted independently (no chaining through a
+    // shadowed variable: the four corners convert to four distinct points).
+    let (nw_lon, nw_lat) = to_wgs84(lon_min, lat_max);
+    let (ne_lon, ne_lat) = to_wgs84(lon_max, lat_max);
+    let (se_lon, se_lat) = to_wgs84(lon_max, lat_min);
+    let (sw_lon, sw_lat) = to_wgs84(lon_min, lat_min);
+    let nw = georef.project(nw_lon, nw_lat)?;
+    let ne = georef.project(ne_lon, ne_lat)?;
+    let se = georef.project(se_lon, se_lat)?;
+    let sw = georef.project(sw_lon, sw_lat)?;
     Some([nw, ne, se, sw])
 }
 
@@ -517,7 +569,7 @@ pub fn tile_corners(tile: &TileRef, georef: &GeoRef) -> Option<[Vec2; 4]> {
 pub fn tile_placements(layer: &TileLayer, min: Vec2, max: Vec2, georef: &GeoRef, zoom: Option<u32>) -> Result<Vec<TilePlacement>, String> {
     let mut out = Vec::new();
     for tile in tiles_for_view(layer, min, max, georef, zoom)? {
-        if let Some(corners) = tile_corners(&tile, georef) {
+        if let Some(corners) = tile_corners_for_layer(&tile, georef, layer.coord_type) {
             out.push(TilePlacement { tile, corners });
         }
     }
@@ -1518,6 +1570,42 @@ mod tests {
         custom.fallback_url_template = Some("https://example.com/{z}/{x}/{y}.png".into());
         custom.fallback_attribution = Some("Example 贡献者".into());
         assert_eq!(custom.display_attribution(), "© OpenStreetMap 贡献者 / Example 贡献者");
+    }
+
+    #[test]
+    fn gcj02_layer_shifts_tiles_but_not_storage() {
+        // A GCJ-02 (`Mercator(china)`) layer places the same tile's corners
+        // ~600 m away from the WGS-84 layer's (the §1.3 offset, display-only):
+        // the tile grid is in GCJ-02 while the vectors stay WGS-84.
+        let g = georef();
+        let wgs = TileLayer::default_osm();
+        let mut gcj = TileLayer::default_osm();
+        gcj.url_template = "https://example.com/{z}/{x}/{y}.png".into();
+        gcj.attribution = "Example 贡献者".into();
+        gcj.coord_type = CoordType::Gcj02;
+        assert!(gcj.validate().is_ok());
+        let (x, y) = lonlat_to_tile(114.0814, 32.1301, 14).unwrap_or((0, 0));
+        let tile = TileRef { z: 14, x, y, url: wgs.tile_url(14, x, y), cache_key: wgs.cache_key(14, x, y) };
+        let wgs_corners = tile_corners_for_layer(&tile, &g, CoordType::Wgs84).unwrap_or([Vec2::ZERO; 4]);
+        let gcj_corners = tile_corners_for_layer(&tile, &g, CoordType::Gcj02).unwrap_or([Vec2::ZERO; 4]);
+        // The GCJ-02 tile's NW corner unprojects to WGS-84 ≈ GCJ→WGS84 of
+        // the tile's NW bound — i.e. the tile is shifted, not the vectors.
+        let (lon, lat) = g.unproject(gcj_corners[0]).unwrap_or((0.0, 0.0));
+        let (lon_min, _, _, lat_max) = tile_bounds_lonlat(14, x, y).unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let (exp_lat, exp_lon) = gcj02_to_wgs84(lat_max, lon_min);
+        assert!((lon - exp_lon).abs() < 1e-6, "{lon} vs {exp_lon}");
+        assert!((lat - exp_lat).abs() < 1e-6, "{lat} vs {exp_lat}");
+        // The shift is the documented ~600 m, not zero and not kilometres.
+        let dx = gcj_corners[0].x - wgs_corners[0].x;
+        let dy = gcj_corners[0].y - wgs_corners[0].y;
+        let shift = (dx * dx + dy * dy).sqrt();
+        assert!((400.0..=800.0).contains(&shift), "GCJ shift {shift} m");
+        // Cache isolation: different source templates → different cache dirs.
+        assert_ne!(tile_cache_rel_path(&wgs, &tile), tile_cache_rel_path(&gcj, &tile));
+        // The OSM default refuses a GCJ-02 frame (its tiles are WGS-84).
+        let mut bad = TileLayer::default_osm();
+        bad.coord_type = CoordType::Gcj02;
+        assert!(bad.validate().unwrap_err().contains("WGS84"));
     }
 
     #[test]
