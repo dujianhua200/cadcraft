@@ -69,6 +69,7 @@ pub const UI_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("ui.cmdline.clear", "Clear Command History", &[], None),
     ("ui.dialog.language", "Interface Language", &["Edit", "Interface Language"], None),
     ("ui.toggle.basemap", "Online Map", &["Tools", "OviMap", "Online Map"], None),
+    ("ui.dialog.mapsources", "Map Sources…", &["Tools", "OviMap", "Map Sources…"], None),
     ("ui.language", "Language", &[], None),
     ("ui.noop", "", &[], None),
     ("ui.quit", "Quit CADCraft", &[], Some("Cmd+Q")),
@@ -115,6 +116,10 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     }
     if id == "ui.toggle.basemap" {
         crate::basemap::toggle(app);
+        return Some(Ok(Value::Null));
+    }
+    if id == "ui.dialog.mapsources" {
+        crate::mapsources::open(app);
         return Some(Ok(Value::Null));
     }
     let toggle = |b: &mut bool, p: &Value| {

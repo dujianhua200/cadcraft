@@ -1361,3 +1361,21 @@
 	Online map: no tiles yet, check the network	Онлайн-карта: плиток ще немає, перевірте мережу
 	Invalid latitude or longitude	Недійсна широта або довгота
 	Open or create a drawing first	Спочатку відкрийте або створіть креслення
+	Map Sources…	Джерела карт…
+	Tile sources for the online map. Only OpenStreetMap and CARTO are built in; add your own source only if you have the right to use it. Attribution is mandatory and is shown verbatim.	Джерела тайлів для онлайн-карти. Вбудовано лише OpenStreetMap і CARTO; додавайте власне джерело, лише якщо маєте право ним користуватися. Атрибуція обов’язкова і показується як є.
+	Set as Current	Зробити поточним
+	Edit Source	Редагувати джерело
+	ID	ID
+	URL Template	Шаблон URL
+	Attribution	Атрибуція
+	Max Zoom	Макс. масштаб
+	Coordinate Type	Тип координат
+	Tile Format	Формат тайлів
+	Tile Size	Розмір тайла
+	Built-in sources keep their URL and attribution; only the max zoom can be changed.	Вбудовані джерела зберігають свої URL та атрибуцію; можна змінити лише макс. масштаб.
+	Import OviMap customMapSource XML	Імпорт OviMap customMapSource XML
+	Paste a customMapSource document below. The XML carries no attribution, so fill in the attribution field — an import without one is refused.	Вставте нижче документ customMapSource. XML не містить атрибуції, тож заповніть поле атрибуції — імпорт без неї відхиляється.
+	Load from File…	Завантажити з файлу…
+	File loaded. Fill in the attribution, then press Import.	Файл завантажено. Заповніть атрибуцію та натисніть «Імпорт».
+	Could not read that file.	Не вдалося прочитати цей файл.
+	Map source applied	Джерело карти застосовано

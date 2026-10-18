@@ -569,6 +569,21 @@ fn tilemap_command_json() {
     let zoom = s.execute("tilemap", &json!({ "zoom": 12 })).unwrap();
     assert_eq!(zoom["tilemap"]["max_zoom"], 12);
     assert!(s.execute("tilemap", &json!({ "action": "explode" })).is_err());
+    // `coordType` (§9.6): a custom source may be GCJ-02; the OSM default may not.
+    let gcj = s
+        .execute(
+            "tilemap",
+            &json!({ "urlTemplate": "https://example.com/{z}/{x}/{y}.png", "attribution": "Example 贡献者", "coordType": "Mercator(china)" }),
+        )
+        .unwrap();
+    assert_eq!(gcj["tilemap"]["coord_type"], "Mercator(china)");
+    assert!(s.execute("tilemap", &json!({ "coordType": "BD-09" })).is_err(), "an unknown coordType is refused");
+    assert!(
+        s.execute("tilemap", &json!({ "urlTemplate": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "coordType": "Mercator(china)" })).is_err(),
+        "the OSM default is WGS-84, never GCJ-02"
+    );
+    let back = s.execute("tilemap", &json!({ "urlTemplate": "https://tile.openstreetmap.org/{z}/{x}/{y}.png" })).unwrap();
+    assert_eq!(back["tilemap"]["coord_type"], "Mercator", "switching back to OSM restores the WGS-84 frame");
     // ovimap.inspect sees the same layer (single source of truth).
     let insp = s.execute("ovimap.inspect", &json!({})).unwrap();
     assert_eq!(insp["tilemap"]["max_zoom"], 12);
