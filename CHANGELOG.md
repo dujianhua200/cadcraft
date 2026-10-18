@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-18
+
+### Added
+
+- Custom map sources: a graphical Map Sources dialog (toolbar
+  "图源管理…" button, Tools ▸ OviMap ▸ 图源管理…) lists sources
+  (name / coordinate type / max zoom / attribution) with add / edit /
+  delete / set-as-current; OK commits, Cancel discards the draft.
+  Built-in OSM / CARTO sources cannot be deleted or re-pointed.
+  Imports OviMap `customMapSource` XML (`mapID` / `name` / `version` /
+  `maxZoom` / `coordType` / `tileType` / `tileFormat` / `tileSize` /
+  `protocol` / `host` / `port` / `url`) with `{$x}` / `{$y}` / `{$z}` /
+  `{$s}` / `{$Galileo}` template substitution; missing fields, bad
+  hosts or bad templates are rejected with a Chinese message, and an
+  import without attribution is rejected. `coordType` supports
+  `Mercator` (WGS84) and `Mercator(china)` (GCJ-02 display-only
+  conversion, storage never polluted). Sources persist in the app
+  configuration and load at startup; tile caches are isolated per
+  source. No proprietary source is bundled: the only built-in sources
+  are OSM + CARTO (OSM data).
+
 ## [0.9.1] - 2026-10-16
 
 ### Fixed
