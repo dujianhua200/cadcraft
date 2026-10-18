@@ -1371,3 +1371,21 @@ menu	View	视图
 	Set Georef…	设置地理参照…
 	Set OviMap Georef…	设置 OviMap 地理参照…
 	Tilemap…	瓦片底图…
+	Map Sources…	图源管理…
+	Tile sources for the online map. Only OpenStreetMap and CARTO are built in; add your own source only if you have the right to use it. Attribution is mandatory and is shown verbatim.	在线地图的瓦片图源。内置仅有 OpenStreetMap 与 CARTO；只有在有权使用时才添加自己的图源。署名必填，将原样显示。
+	Set as Current	设为当前
+	Edit Source	编辑图源
+	ID	ID
+	URL Template	URL 模板
+	Attribution	署名
+	Max Zoom	最高级别
+	Coordinate Type	坐标类型
+	Tile Format	瓦片格式
+	Tile Size	瓦片尺寸
+	Built-in sources keep their URL and attribution; only the max zoom can be changed.	内置图源的 URL 与署名不可修改，仅可修改最高级别。
+	Import OviMap customMapSource XML	导入奥维 customMapSource XML
+	Paste a customMapSource document below. The XML carries no attribution, so fill in the attribution field — an import without one is refused.	在下方粘贴 customMapSource 文档。XML 中没有署名，请在署名栏填写，无署名拒绝导入。
+	Load from File…	从文件载入…
+	File loaded. Fill in the attribution, then press Import.	文件已载入。请填写署名，然后点“导入”。
+	Could not read that file.	无法读取该文件。
+	Map source applied	图源已应用

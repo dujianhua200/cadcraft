@@ -14,6 +14,9 @@
 //! in the same call (§9.5, never silently keep the OSM attribution for a
 //! foreign source); switching back to the OSM URL restores its attribution
 //! and its CARTO fallback unless fallback params are given in the same call.
+//! `{coordType?: "Mercator" | "Mercator(china)"}` → the source's coordinate
+//! frame (§9.6): `Mercator(china)` is a GCJ-02 source, display-only
+//! conversion, never applied to the OSM default.
 //! `{fallbackUrlTemplate, fallbackAttribution?}` → set the fallback source
 //! (tried when the primary fails, §9.4): a non-empty fallback URL **must**
 //! carry a non-empty `fallbackAttribution` in the same call; an empty
@@ -21,7 +24,7 @@
 //! maxZoom?: 0..=30, zoom?: alias of maxZoom}` → settings. A custom source's `maxZoom` may exceed 19; the OSM
 //! default never requests above z=19 (`TileLayer::validate`).
 
-use cadcraft_doc::gis::{DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_MAX_ZOOM, DEFAULT_TILE_URL, TileLayer};
+use cadcraft_doc::gis::{CoordType, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_MAX_ZOOM, DEFAULT_TILE_URL, TileLayer};
 use serde_json::{Value, json};
 
 use super::*;
@@ -33,7 +36,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("tilemap", "Tilemap…", run_tilemap)
             .menu(&["Tools", "OviMap", "Tilemap…"])
             .params(
-                "{} → status; {enabled?: bool} on/off; {action?: on|off|status|reset}; {urlTemplate?, attribution? (custom source: required)}; {fallbackUrlTemplate?, fallbackAttribution? (fallback source: required when set; empty urlTemplate clears)}; {opacity?: 0..=1, maxZoom? | zoom?: 0..=30} → {tilemap, message, network}",
+                "{} → status; {enabled?: bool} on/off; {action?: on|off|status|reset}; {urlTemplate?, attribution? (custom source: required)}; {coordType?: Mercator | Mercator(china)}; {fallbackUrlTemplate?, fallbackAttribution? (fallback source: required when set; empty urlTemplate clears)}; {opacity?: 0..=1, maxZoom? | zoom?: 0..=30} → {tilemap, message, network}",
             )
             .alias(&["tilemapset"])
             .noundo()
@@ -49,6 +52,7 @@ fn status(s: &Session) -> Result<Value> {
             "url_template": layer.url_template,
             "attribution": layer.attribution,
             "display_attribution": layer.display_attribution(),
+            "coord_type": layer.coord_type.as_str(),
             "fallback_url_template": layer.fallback_url_template,
             "fallback_attribution": layer.fallback_attribution,
             "opacity": layer.opacity,
@@ -122,6 +126,8 @@ fn run_tilemap(s: &mut Session, p: &Value) -> Result<Value> {
         // source's higher cap must not leak into OSM requests.
         if template == DEFAULT_TILE_URL {
             layer.max_zoom = layer.max_zoom.min(DEFAULT_TILE_MAX_ZOOM);
+            // The OSM default is WGS-84: a GCJ-02 frame must not leak into it.
+            layer.coord_type = CoordType::Wgs84;
             if str_param(p, "fallbackUrlTemplate").is_none() {
                 // Switching back to OSM restores its CARTO fallback too, unless
                 // the caller sets a fallback explicitly in this same call.
@@ -134,6 +140,13 @@ fn run_tilemap(s: &mut Session, p: &Value) -> Result<Value> {
         changed = true;
     } else if let Some(a) = str_param(p, "attribution") {
         layer.attribution = a.trim().to_string();
+        changed = true;
+    }
+    // Coordinate frame: a GCJ-02 frame on the OSM default is refused by
+    // `TileLayer::validate` below (OSM tiles are WGS-84).
+    if let Some(ct) = str_param(p, "coordType") {
+        let parsed = CoordType::parse(ct).ok_or_else(|| bad("tilemap", "`coordType` 须为 Mercator 或 Mercator(china)"))?;
+        layer.coord_type = parsed;
         changed = true;
     }
     // Fallback switch: a non-empty fallback URL without its attribution in the

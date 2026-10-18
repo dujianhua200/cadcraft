@@ -14,6 +14,7 @@ mod gdt;
 pub mod gis;
 mod header;
 pub mod library;
+pub mod map_source;
 mod plotstyle;
 mod plotter;
 mod progress;
