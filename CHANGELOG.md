@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-19
+
+### Fixed
+
+- Map source switching: setting a current source in the Map Sources
+  dialog (set-as-current + OK) now actually applies to the drawing.
+  Previously the library current source was never applied to a fresh
+  drawing (`Drawing.tilemap` stayed `None`, so the canvas fell back to
+  the OSM default), and toggling the basemap on baked the OSM default
+  into the drawing's layer, so switching appeared to do nothing and
+  always stayed on the system default. Priority is now pinned:
+  drawing explicit layer > library current source > OSM default.
+  Switching failures now surface a Chinese error in the status bar
+  instead of silently staying on the default source.
+
 ## [0.10.0] - 2026-10-18
 
 ### Added
