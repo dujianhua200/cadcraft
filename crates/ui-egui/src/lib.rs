@@ -533,6 +533,20 @@ impl CadApp {
                 if self.session.state().is_ok_and(|st| cadcraft_engine::blockedit::has_authoring_elements(&st.doc)) {
                     self.ui.dialog = Some("authoring".into());
                 }
+                // A freshly opened drawing has no stored tile layer: follow
+                // the library current instead of silently falling back to
+                // OSM. The tile layer is display-only (never written to a
+                // file), so re-mark the drawing saved — opening a file
+                // must not dirty it.
+                match self.apply_library_current_tilemap() {
+                    Ok(true) => {
+                        if let Ok(st) = self.session.state_mut() {
+                            st.saved = st.doc.clone();
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => self.set_status(e),
+                }
             }
         }
     }
