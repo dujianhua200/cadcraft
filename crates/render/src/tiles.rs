@@ -40,10 +40,52 @@ impl TileImage {
         Some(TileImage { width, height, rgba })
     }
 
+    /// Decode a tile image to straight-alpha RGBA, sniffing the format
+    /// from the magic bytes: PNG (`89 50 4E 47…`) or JPEG (`FF D8 FF…`).
+    /// Anything else (WebP, HTML error pages, garbage) is `None` — the
+    /// caller draws a blank placeholder. Sniffing beats trusting the
+    /// source's declared `tileFormat`: several real sources serve JPEG
+    /// bytes (satellite imagery) while the dialog defaults to PNG, and a
+    /// PNG-only decoder silently blanked every one of them (§9.5).
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > 1 << 22 {
+            return None;
+        }
+        if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+            return Self::decode_png(bytes);
+        }
+        if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+            return Self::decode_jpeg(bytes);
+        }
+        None
+    }
+
+    /// Decode a JPEG tile (satellite imagery) to straight-alpha RGBA
+    /// (opaque: JPEG has no alpha). Dimensions are checked *before* the
+    /// full decode so a hostile header cannot balloon an allocation.
+    /// `None` for undecodable, truncated, or over-sized images.
+    pub fn decode_jpeg(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > 1 << 22 {
+            return None;
+        }
+        use std::io::Cursor;
+        let (w, h) = image::ImageReader::with_format(Cursor::new(bytes), image::ImageFormat::Jpeg)
+            .into_dimensions()
+            .ok()
+            .filter(|(w, h)| *w > 0 && *h > 0 && *w <= MAX_TILE_DIM && *h <= MAX_TILE_DIM)?;
+        let rgba = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg).ok()?.to_rgba8();
+        if rgba.width() != w || rgba.height() != h {
+            return None;
+        }
+        TileImage::from_rgba(w, h, rgba.into_raw())
+    }
+
     /// Decode a PNG (the tile format) to straight-alpha RGBA. `tiny-skia`
     /// decodes to premultiplied RGBA, so the alpha is divided back out; a
     /// fully transparent pixel becomes (0, 0, 0, 0). `None` for undecodable,
     /// indexed, or over-sized images — the caller draws a blank placeholder.
+    /// Prefer [`TileImage::decode`]: it sniffs the format instead of
+    /// assuming PNG.
     pub fn decode_png(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > 1 << 22 {
             return None;
@@ -109,7 +151,7 @@ pub fn build_tile_quads(
     placements
         .into_iter()
         .map(|p| {
-            let image = load(&p.tile).and_then(|bytes| TileImage::decode_png(&bytes));
+            let image = load(&p.tile).and_then(|bytes| TileImage::decode(&bytes));
             TileQuad { tile: p.tile, corners: p.corners, opacity, image }
         })
         .collect()
