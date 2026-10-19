@@ -86,6 +86,11 @@ impl Stub {
             })
             .collect()
     }
+
+    /// Whether any seen request line contains `needle` (a tile path fragment).
+    fn saw(&self, needle: &str) -> bool {
+        self.seen.lock().unwrap().iter().any(|req| req.contains(needle))
+    }
 }
 
 impl Drop for Stub {
@@ -301,4 +306,56 @@ fn fetch_both_sources_failing_stays_blank() {
     assert_eq!(fallback.requests(), 3);
     cleanup_cache(&layer, &t);
     cleanup_cache(&layer.fallback_layer().expect("fallback configured"), &t);
+}
+
+/// Panning follows the view: a burst of 600 tile requests (several pans'
+/// worth) must not bury the newest view's tiles behind stale ones. The
+/// queue is capped (512): the oldest queued tiles are dropped, the newest
+/// are still fetched, and a dropped tile can be re-requested (its dedup
+/// key is freed — otherwise it would blank forever).
+#[test]
+fn fetcher_queue_drops_stale_tiles_and_follows_pan() {
+    use std::sync::atomic::AtomicUsize;
+    let first = Arc::new(AtomicUsize::new(0));
+    let first2 = Arc::clone(&first);
+    let stub = Stub::new(move |_| {
+        // The first request stalls the single worker while the burst is
+        // enqueued, so the queue deterministically overflows the cap.
+        if first2.fetch_add(1, Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        } else {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        (200, "image/png", PNG_1X1.to_vec())
+    });
+    let layer = layer_for(&stub);
+    let fetcher = TileFetcher::new(1, fast_opts());
+    let tiles: Vec<TileRef> =
+        (0..600).map(|x| TileRef { z: 10, x, y: 0, url: layer.tile_url(10, x, 0), cache_key: layer.cache_key(10, x, 0) }).collect();
+    for t in &tiles {
+        fetcher.request(&layer, t);
+    }
+    // Queue + in-flight stay bounded (512 queued + ≤513 in flight),
+    // however many pans pile in.
+    assert!(fetcher.pending() <= 1030, "the queue must stay bounded, got {}", fetcher.pending());
+    // Wait for quiescence.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while fetcher.pending() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(fetcher.pending(), 0, "the queue must drain");
+    // The newest tile (the current view's) was fetched; a stale middle
+    // tile was dropped, never fetched.
+    assert!(stub.saw("/10/599/0.png"), "the newest tile must be fetched");
+    assert!(!stub.saw("/10/50/0.png"), "a stale queued tile must be dropped, not fetched");
+    // A dropped tile re-requested comes back (its dedup key was freed).
+    fetcher.request(&layer, &tiles[50]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !stub.saw("/10/50/0.png") && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(stub.saw("/10/50/0.png"), "a dropped tile must be re-requestable");
+    for t in tiles.iter().take(1) {
+        cleanup_cache(&layer, t);
+    }
 }

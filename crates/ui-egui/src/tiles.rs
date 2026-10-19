@@ -173,7 +173,15 @@ pub fn draw_tilemap_with_hook(
             continue;
         }
         if !cache.textures.contains_key(&key) {
-            let decoded = load(&layer, &p.tile).and_then(|bytes| TileImage::decode_png(&bytes));
+            // Bytes first, then decode (sniffed format: PNG/JPEG): a cache
+            // miss with the fetch still in flight is *not* a failure — the
+            // bytes are coming, so skip without back-off and decode promptly
+            // when they land. Only a real decode failure (bytes present but
+            // undecodable) or a fetch that already finished empty earns
+            // back-off; otherwise a pan's tiles would sit out up to 30 s
+            // each after their bytes arrived.
+            let bytes = load(&layer, &p.tile);
+            let decoded = bytes.as_deref().and_then(TileImage::decode);
             match decoded {
                 Some(img) => {
                     let (w, h) = (img.width as usize, img.height as usize);
@@ -186,6 +194,9 @@ pub fn draw_tilemap_with_hook(
                     cache.failed.remove(&key);
                 }
                 None => {
+                    if bytes.is_none() && TileFetcher::global().is_pending(&layer, &p.tile) {
+                        continue;
+                    }
                     let attempts = cache.failed.get(&key).map(|(a, _)| *a).unwrap_or(0).saturating_add(1);
                     let delay = tile_backoff_delay_ms(attempts);
                     cache.failed.insert(key.clone(), (attempts, now + std::time::Duration::from_millis(delay)));
@@ -251,6 +262,13 @@ mod tests {
         bytes
     }
 
+    fn red_jpeg_bytes() -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg).unwrap_or(());
+        bytes
+    }
+
     #[test]
     fn tilemap_overlay_cache_behaviour() {
         // 1) Seeded cache: every tile the view needs becomes a texture.
@@ -304,6 +322,38 @@ mod tests {
         assert_eq!(cache2.texture_count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn tilemap_draws_jpeg_tiles() {
+        // A cache holding JPEG bytes (satellite sources) must produce
+        // textures — the canvas used to decode PNG only, blanking them.
+        let dir = std::env::temp_dir().join(format!("cadcraft-tilemap-jpeg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let layer = TileLayer::default_osm();
+        let georef = GeoRef::centred(32.1301, 114.0814);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
+        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18 };
+        let bounds = xf.world_bounds();
+        let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
+        assert!(!placements.is_empty());
+        for p in &placements {
+            let path = dir.join(tile_cache_rel_path(&layer, &p.tile));
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, red_jpeg_bytes());
+        }
+        let mut d = Drawing::new_metric();
+        d.georef = Some(georef);
+        d.tilemap = Some(layer);
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx.clone(), egui::LayerId::background(), rect);
+        let mut cache = TileCache::default();
+        let load = |layer: &TileLayer, tile: &cadcraft_doc::gis::TileRef| std::fs::read(dir.join(tile_cache_rel_path(layer, tile))).ok();
+        draw_tilemap_with(&mut cache, &d, &painter, &xf, &ctx, &load);
+        assert_eq!(cache.texture_count(), placements.len(), "every cached JPEG tile becomes a texture");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

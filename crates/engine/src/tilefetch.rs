@@ -59,6 +59,16 @@ const MAX_TILE_BYTES: usize = 1 << 20;
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Worker threads: the concurrency cap (§9.1, ≤ 4).
 const WORKERS: usize = 4;
+/// Most tiles waiting in the fetch queue. A pan enqueues a whole new view's
+/// tiles every frame; without a bound, a few pans bury the current view's
+/// tiles behind hundreds of stale ones (FIFO) and the map stops following
+/// the pan for minutes. Past the cap the oldest queued tiles are dropped —
+/// safe, because the canvas re-requests the tiles it still needs every
+/// frame: a dropped tile for an abandoned view never comes back, a dropped
+/// tile for the current view is re-queued at once. Dropped keys are
+/// removed from `in_flight` too, or the dedup would block the re-request
+/// forever (a permanent blank).
+const MAX_QUEUE: usize = 512;
 
 /// Fetch tuning. The defaults are the production policy; tests pass small
 /// timeouts/back-offs so a stub server's failures stay fast.
@@ -268,7 +278,9 @@ impl TileFetcher {
 
     /// Enqueue a tile for background fetch: a no-op when the layer is off, the
     /// cache is fresh, or the tile is already queued/in flight. Never blocks,
-    /// never fetches on the calling thread.
+    /// never fetches on the calling thread. Past [`MAX_QUEUE`] queued tiles
+    /// the oldest are dropped (they belong to views the user already left;
+    /// the canvas re-requests the ones it still needs).
     pub fn request(&self, layer: &TileLayer, tile: &TileRef) {
         #[cfg(target_arch = "wasm32")]
         {
@@ -290,9 +302,28 @@ impl TileFetcher {
             {
                 let mut queue = poisoned(self.inner.queue.lock());
                 queue.push_back((layer.clone(), tile.clone()));
+                // Drop stale queued tiles past the cap (oldest first: they
+                // belong to abandoned views), freeing their dedup keys so a
+                // re-request for a tile still needed can queue it again.
+                while queue.len() > MAX_QUEUE {
+                    if let Some((old_layer, old_tile)) = queue.pop_front() {
+                        let old_key = tile_cache_rel_path(&old_layer, &old_tile);
+                        poisoned(self.inner.in_flight.lock()).remove(&old_key);
+                    } else {
+                        break;
+                    }
+                }
             }
             self.inner.notify.notify_one();
         }
+    }
+
+    /// Whether this tile is queued or being fetched (the canvas uses this
+    /// to tell "fetch in flight, bytes coming" apart from "fetch failed":
+    /// an in-flight tile is skipped without back-off so it decodes promptly
+    /// when its bytes land).
+    pub fn is_pending(&self, layer: &TileLayer, tile: &TileRef) -> bool {
+        poisoned(self.inner.in_flight.lock()).contains(&tile_cache_rel_path(layer, tile))
     }
 
     /// Whether a worker finished a tile since the last call (the canvas

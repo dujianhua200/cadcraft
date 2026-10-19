@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-19
+
+### Fixed
+
+- Custom map source compatibility: sources that work in OviMap but
+  showed blank in CadCraft now work. Tile rendering sniffed only PNG;
+  JPEG tiles (satellite/terrain from the联通 mirror and Gaode
+  satellite) failed to decode and rendered blank. The renderer now
+  sniffs PNG/JPEG by magic bytes and decodes both.
+- Basemap panning: the tile fetch queue was an unbounded FIFO, so after
+  a few pans the current viewport's tiles were buried behind hundreds
+  of stale tiles and the map only ever showed a small patch. The queue
+  is now capped at 512, drops the oldest entries, and clears their
+  dedup keys so dropped tiles can be re-fetched; in-flight tiles no
+  longer count as failures, so tiles decode as soon as their bytes
+  arrive instead of waiting out a back-off.
+- Note: 星图地球影像 returns HTTP 401 (`no token`) and needs a token
+  in its URL; OSM 街道(备援) is unreachable from the user's network.
+  Neither is a CadCraft bug.
+
 ## [0.10.1] - 2026-10-19
 
 ### Fixed

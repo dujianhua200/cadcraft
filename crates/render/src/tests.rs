@@ -1118,6 +1118,32 @@ fn tile_image_decode_roundtrip() {
 }
 
 #[test]
+fn tile_image_decode_sniffs_jpeg_not_just_png() {
+    // A JPEG tile (what satellite sources serve) must decode through the
+    // sniffing entry point — a PNG-only decoder blanked every JPEG source.
+    let mut jpeg = Vec::new();
+    let red = image::RgbaImage::from_pixel(4, 4, image::Rgba([255, 0, 0, 255]));
+    image::DynamicImage::ImageRgba8(red)
+        .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .unwrap_or_else(|_| panic!("encode jpeg"));
+    assert!(jpeg.starts_with(&[0xff, 0xd8, 0xff]), "test fixture is really a JPEG");
+    assert!(TileImage::decode_png(&jpeg).is_none(), "PNG decoding JPEG bytes must fail (the old bug's shape)");
+    let img = TileImage::decode(&jpeg).unwrap_or_else(|| panic!("sniffed decode must handle JPEG"));
+    assert_eq!((img.width, img.height), (4, 4));
+    // JPEG is lossy: red survives approximately, alpha is opaque.
+    assert!(img.rgba[0] > 200 && img.rgba[1] < 60 && img.rgba[2] < 60, "red-ish JPEG pixel: {:?}", &img.rgba[0..4]);
+    assert_eq!(img.rgba[3], 255, "JPEG has no alpha: opaque");
+    // The sniffing entry still handles PNG.
+    let png_img = TileImage::decode(&red_png()).unwrap_or_else(|| panic!("sniffed decode must handle PNG"));
+    assert_eq!(&png_img.rgba[0..4], &[255, 0, 0, 255]);
+    // Truncated JPEG, WebP magic, and HTML error pages are blank, never a panic.
+    assert!(TileImage::decode(&jpeg[..jpeg.len() / 2]).is_none(), "truncated JPEG");
+    assert!(TileImage::decode(b"RIFF\x10\x00\x00\x00WEBPVP8 ").is_none(), "WebP is not decoded (blank placeholder)");
+    assert!(TileImage::decode(b"<html>no token</html>").is_none(), "an error page is not an image");
+    assert!(TileImage::decode(b"").is_none());
+}
+
+#[test]
 fn tile_quads_from_cache_loader() {
     use cadcraft_doc::gis::{GeoRef, TileLayer};
     let layer = TileLayer::default_osm();

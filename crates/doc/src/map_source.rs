@@ -821,4 +821,144 @@ mod tests {
         assert_eq!(CoordType::Wgs84.as_str(), "Mercator");
         assert_eq!(CoordType::Gcj02.as_str(), "Mercator(china)");
     }
+
+    /// The ten user sources, as handed out in OviMap XML: import must
+    /// reproduce ovimap's URLs exactly (same host, path, query, datum,
+    /// zoom cap) — an import that silently rewrites a URL sends the
+    /// fetcher somewhere the source does not serve, and the tile blanks.
+    /// Each case is `(xml, expected expanded tile url at z=12,x=3345,y=1661,
+    /// expected coord type, expected max zoom)`.
+    #[test]
+    fn ovi_xml_import_matches_ovimap_urls() {
+        fn xml(id: &str, name: &str, max_zoom: u32, coord: &str, format: &str, host: &str, url: &str) -> String {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><customMapSource><mapID>{id}</mapID><name>{name}</name><version>0</version><maxZoom>{max_zoom}</maxZoom><coordType>{coord}</coordType><tileType>Map</tileType><tileFormat>{format}</tileFormat><tileSize>256</tileSize><protocol>https</protocol><host>{host}</host><port>443</port><url>{url}</url></customMapSource>"#
+            )
+        }
+        let cases: [(String, &str, CoordType, u32); 10] = [
+            (
+                xml(
+                    "sydt",
+                    "联通卫星+注记",
+                    20,
+                    "Mercator(china)",
+                    "JPG",
+                    "sydt.hainasi.eu.org",
+                    "/vt/lyrs=s,h&amp;hl=zh-CN&amp;gl=CN&amp;src=app&amp;x={$x}&amp;y={$y}&amp;z={$z}&amp;scale=1",
+                ),
+                "https://sydt.hainasi.eu.org/vt/lyrs=s,h&hl=zh-CN&gl=CN&src=app&x=3345&y=1661&z=12&scale=1",
+                CoordType::Gcj02,
+                20,
+            ),
+            (
+                xml(
+                    "sydt-s",
+                    "联通纯卫星",
+                    20,
+                    "Mercator(china)",
+                    "JPG",
+                    "sydt.hainasi.eu.org",
+                    "/vt/lyrs=s&amp;hl=zh-CN&amp;gl=CN&amp;src=app&amp;x={$x}&amp;y={$y}&amp;z={$z}&amp;scale=1",
+                ),
+                "https://sydt.hainasi.eu.org/vt/lyrs=s&hl=zh-CN&gl=CN&src=app&x=3345&y=1661&z=12&scale=1",
+                CoordType::Gcj02,
+                20,
+            ),
+            (
+                xml(
+                    "sydt-m",
+                    "联通街道图",
+                    20,
+                    "Mercator(china)",
+                    "JPG",
+                    "sydt.hainasi.eu.org",
+                    "/vt/lyrs=m&amp;hl=zh-CN&amp;gl=CN&amp;src=app&amp;x={$x}&amp;y={$y}&amp;z={$z}&amp;scale=1",
+                ),
+                "https://sydt.hainasi.eu.org/vt/lyrs=m&hl=zh-CN&gl=CN&src=app&x=3345&y=1661&z=12&scale=1",
+                CoordType::Gcj02,
+                20,
+            ),
+            (
+                xml(
+                    "sydt-p",
+                    "联通地形图",
+                    20,
+                    "Mercator(china)",
+                    "JPG",
+                    "sydt.hainasi.eu.org",
+                    "/vt/lyrs=p&amp;hl=zh-CN&amp;gl=CN&amp;src=app&amp;x={$x}&amp;y={$y}&amp;z={$z}&amp;scale=1",
+                ),
+                "https://sydt.hainasi.eu.org/vt/lyrs=p&hl=zh-CN&gl=CN&src=app&x=3345&y=1661&z=12&scale=1",
+                CoordType::Gcj02,
+                20,
+            ),
+            (
+                xml(
+                    "amap-s",
+                    "高德卫星",
+                    18,
+                    "Mercator(china)",
+                    "JPG",
+                    "webst02.is.autonavi.com",
+                    "/appmaptile?style=6&amp;x={$x}&amp;y={$y}&amp;z={$z}",
+                ),
+                "https://webst02.is.autonavi.com/appmaptile?style=6&x=3345&y=1661&z=12",
+                CoordType::Gcj02,
+                18,
+            ),
+            (
+                xml(
+                    "amap-road",
+                    "高德街道",
+                    18,
+                    "Mercator(china)",
+                    "PNG",
+                    "webrd02.is.autonavi.com",
+                    "/appmaptile?lang=zh_cn&amp;size=1&amp;scale=1&amp;style=8&amp;x={$x}&amp;y={$y}&amp;z={$z}",
+                ),
+                "https://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=3345&y=1661&z=12",
+                CoordType::Gcj02,
+                18,
+            ),
+            (
+                xml("geovis-img", "星图地球影像", 18, "Mercator", "JPG", "tiles1.geovisearth.com", "/base/v1/img/{$z}/{$x}/{$y}"),
+                "https://tiles1.geovisearth.com/base/v1/img/12/3345/1661",
+                CoordType::Wgs84,
+                18,
+            ),
+            (
+                xml("osm-proxy", "OSM 街道(反代加速)", 19, "Mercator", "PNG", "hzyt.hainasi.eu.org", "/tile/{$z}/{$x}/{$y}.png"),
+                "https://hzyt.hainasi.eu.org/tile/12/3345/1661.png",
+                CoordType::Wgs84,
+                19,
+            ),
+            (
+                xml("osm", "OSM 街道(备援)", 19, "Mercator", "PNG", "tile.openstreetmap.org", "/{$z}/{$x}/{$y}.png"),
+                "https://tile.openstreetmap.org/12/3345/1661.png",
+                CoordType::Wgs84,
+                19,
+            ),
+            (
+                xml(
+                    "amap-ann",
+                    "高德注记",
+                    18,
+                    "Mercator(china)",
+                    "PNG",
+                    "webst01.is.autonavi.com",
+                    "/appmaptile?style=8&amp;x={$x}&amp;y={$y}&amp;z={$z}",
+                ),
+                "https://webst01.is.autonavi.com/appmaptile?style=8&x=3345&y=1661&z=12",
+                CoordType::Gcj02,
+                18,
+            ),
+        ];
+        for (doc, expected_url, expected_coord, expected_zoom) in cases {
+            let s = parse_ovi_custom_map_source(&doc, "测试署名").expect("the handed-out XML must import");
+            let layer = s.to_tile_layer();
+            assert_eq!(layer.tile_url(12, 3345, 1661), expected_url, "import must not rewrite the URL for {}", s.name);
+            assert_eq!(s.coord_type, expected_coord, "coord type for {}", s.name);
+            assert_eq!(s.max_zoom, expected_zoom, "max zoom for {}", s.name);
+        }
+    }
 }

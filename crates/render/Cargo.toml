@@ -16,6 +16,9 @@ cadcraft-fonts = { workspace = true }
 cadcraft-dwg = { workspace = true }
 tiny-skia = { workspace = true }
 lyon_tessellation = { workspace = true }
+# Tile images: JPEG satellite tiles decode through the image crate
+# (tiny-skia only decodes PNG); the format is sniffed, never assumed.
+image = { workspace = true }
 
 # Display lists of large drawings are built on all cores (not on the web, which has no threads).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
