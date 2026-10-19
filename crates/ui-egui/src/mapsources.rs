@@ -207,6 +207,36 @@ pub fn open(app: &mut CadApp) {
     app.ui.dialog = Some("mapsources".into());
 }
 
+impl CadApp {
+    /// Switch the active drawing to the library's current source when the
+    /// drawing has no stored tile layer (a fresh drawing follows the
+    /// library current instead of silently falling back to OSM). No-op
+    /// when the drawing already has a layer (its own explicit choice
+    /// wins) or there is no drawing open. Returns whether the layer was
+    /// switched. Runs through the `tilemap` command, so validation and
+    /// the OSM fallback-restore rules match the dialog OK path; errors
+    /// surface in Chinese — never a silent stay on the default.
+    pub(crate) fn apply_library_current_tilemap(&mut self) -> Result<bool, String> {
+        let has_layer = self.session.doc().map(|d| d.tilemap.is_some()).unwrap_or(false);
+        if has_layer || self.session.doc().is_err() {
+            return Ok(false);
+        }
+        let current = self.map_sources.current();
+        self.session
+            .execute(
+                "tilemap",
+                &json!({
+                    "urlTemplate": current.url_template,
+                    "attribution": current.attribution,
+                    "maxZoom": current.max_zoom,
+                    "coordType": current.coord_type.as_str(),
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
 /// The dialog: source list + New/Edit/Delete/Set Current, the edit form,
 /// the OviMap XML import, and OK/Cancel.
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
@@ -453,5 +483,107 @@ mod tests {
         assert_eq!(EditDraft::slug("My Source 1"), "my-source-1");
         assert_eq!(EditDraft::slug("演示图源"), "custom");
         assert_eq!(EditDraft::slug("  "), "custom");
+    }
+
+    /// Repro: set a library source current + OK, then the map must follow
+    /// the library — across the Online Map toggle and across reopening a
+    /// drawing. The library current is the user's choice; the drawing's
+    /// `TileLayer` is what the canvas reads, and the two must not drift
+    /// apart (a fresh drawing must not silently fall back to OSM).
+    #[test]
+    fn library_current_survives_toggle_and_reopen() {
+        use cadcraft_doc::Drawing;
+        use cadcraft_doc::gis::GeoRef;
+        use cadcraft_engine::{Session, tilemap::effective_tilemap};
+
+        let mut app = CadApp::new(Session::empty(), crate::Services::default());
+        let mut d = Drawing::new_metric();
+        d.georef = Some(GeoRef::centred(32.1301, 114.0814));
+        app.session.open_drawing(d, "Test", None);
+
+        // Library: add a custom source and make it current.
+        let source = cadcraft_doc::gis::parse_ovi_custom_map_source(XML, "演示 贡献者").expect("valid XML");
+        app.map_sources.add(source).expect("add");
+        app.map_sources.set_current("demo").expect("set current");
+
+        // Dialog OK applies the library current to the drawing.
+        let current = app.map_sources.current();
+        let r = app.run(
+            "tilemap",
+            serde_json::json!({
+                "urlTemplate": current.url_template,
+                "attribution": current.attribution,
+                "maxZoom": current.max_zoom,
+                "coordType": current.coord_type.as_str(),
+            }),
+        );
+        assert!(r.is_ok(), "dialog OK applies: {r:?}");
+        assert_eq!(
+            effective_tilemap(app.session.doc().expect("doc")).url_template,
+            "https://tiles.example.com/{z}/{x}/{y}.png",
+            "dialog OK must switch the drawing to the library current"
+        );
+
+        // Toggle off + on must preserve the source (not reset to OSM).
+        app.run("tilemap", serde_json::json!({ "action": "off" })).expect("off");
+        app.run("tilemap", serde_json::json!({ "action": "on" })).expect("on");
+        assert_eq!(
+            effective_tilemap(app.session.doc().expect("doc")).url_template,
+            "https://tiles.example.com/{z}/{x}/{y}.png",
+            "toggle off/on must preserve the source"
+        );
+
+        // Reopening a drawing: the library current must win over OSM.
+        // `open_drawing` alone does not apply it; `opened()` (the file-open
+        // funnel) calls `apply_library_current_tilemap`, simulated here.
+        let mut d2 = Drawing::new_metric();
+        d2.georef = Some(GeoRef::centred(32.1301, 114.0814));
+        app.session.open_drawing(d2, "Test2", None);
+        assert!(app.apply_library_current_tilemap().expect("apply on open"));
+        assert_eq!(
+            effective_tilemap(app.session.doc().expect("doc")).url_template,
+            "https://tiles.example.com/{z}/{x}/{y}.png",
+            "a fresh drawing must follow the library current, not the OSM default"
+        );
+
+        // Toggling the map on in the fresh drawing must use the library
+        // current, not materialise OSM.
+        crate::basemap::toggle(&mut app);
+        assert_eq!(
+            effective_tilemap(app.session.doc().expect("doc")).url_template,
+            "https://tiles.example.com/{z}/{x}/{y}.png",
+            "toggle-on in a fresh drawing must use the library current"
+        );
+
+        // Switching the library current back to OSM must take effect on
+        // the next open too (with the CARTO fallback restored).
+        app.map_sources.set_current("osm").expect("set current OSM");
+        let mut d3 = Drawing::new_metric();
+        d3.georef = Some(GeoRef::centred(32.1301, 114.0814));
+        app.session.open_drawing(d3, "Test3", None);
+        assert!(app.apply_library_current_tilemap().expect("apply OSM on open"));
+        let layer = effective_tilemap(app.session.doc().expect("doc"));
+        assert_eq!(layer.url_template, "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "switching back to the OSM default must take effect");
+        assert!(layer.fallback_url_template.is_some(), "switching back to OSM must restore the CARTO fallback");
+
+        // A drawing with an explicit layer wins over the library current:
+        // the library current is OSM here, the drawing goes custom, and
+        // applying the library current must not overwrite the drawing.
+        app.run(
+            "tilemap",
+            serde_json::json!({
+                "urlTemplate": "https://tiles.example.com/{z}/{x}/{y}.png",
+                "attribution": "演示 贡献者",
+                "maxZoom": 19,
+                "coordType": "Mercator",
+            }),
+        )
+        .expect("dialog OK custom");
+        assert!(!app.apply_library_current_tilemap().expect("apply no-op"));
+        assert_eq!(
+            effective_tilemap(app.session.doc().expect("doc")).url_template,
+            "https://tiles.example.com/{z}/{x}/{y}.png",
+            "the drawing's explicit layer must win over the library current"
+        );
     }
 }
