@@ -46,15 +46,26 @@ pub fn toggle(app: &mut CadApp) {
         app.set_status(crate::tl!("Open or create a drawing first"));
         return;
     };
-    if cadcraft_doc::gis::basemap_visible(doc) {
-        if app.run("tilemap", json!({ "action": "off" })).is_ok() {
-            app.set_status(crate::tl!("Online map off"));
+    let basemap_visible = cadcraft_doc::gis::basemap_visible(doc);
+    let has_georef = doc.georef.is_some();
+    // A drawing without a stored layer follows the library current: stamp
+    // it first, so a bare `{action: "on"}` / `{action: "off"}` does not
+    // materialise the OSM default as the drawing's layer.
+    if let Err(e) = app.apply_library_current_tilemap() {
+        app.set_status(e);
+        return;
+    }
+    if basemap_visible {
+        match app.run("tilemap", json!({ "action": "off" })) {
+            Ok(_) => app.set_status(crate::tl!("Online map off")),
+            Err(e) => app.set_status(e),
         }
         return;
     }
-    if doc.georef.is_some() {
-        if app.run("tilemap", json!({ "action": "on" })).is_ok() {
-            app.set_status(crate::tl!("Online map on"));
+    if has_georef {
+        match app.run("tilemap", json!({ "action": "on" })) {
+            Ok(_) => app.set_status(crate::tl!("Online map on")),
+            Err(e) => app.set_status(e),
         }
         return;
     }
@@ -118,6 +129,12 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
         }
     };
     if let Err(e) = app.run("ovimap.georef", json!({ "originLat": lat_v, "originLon": lon_v, "centralMeridian": lon_v })) {
+        app.basemap_georef = Some(GeorefDraft { lat, lon, error: Some(e) });
+        return;
+    }
+    // A drawing without a stored layer follows the library current;
+    // a bare `{action: "on"}` would materialise the OSM default.
+    if let Err(e) = app.apply_library_current_tilemap() {
         app.basemap_georef = Some(GeorefDraft { lat, lon, error: Some(e) });
         return;
     }
