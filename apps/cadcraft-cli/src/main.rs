@@ -644,6 +644,8 @@ fn main() -> ExitCode {
 
 fn cli() -> ExitCode {
     install_io();
+    // Headless exports build display lists too: resolve fonts up front, as the app does.
+    cadcraft_fonts::warm_up();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
     let r = match args.first().map(String::as_str) {

@@ -82,6 +82,10 @@ const MAX_CACHE_ENTRIES: usize = 32;
 struct ParsedEmf {
     /// The header's `rclBounds` (device units), for the frame mapping.
     bounds: Bounds2,
+    /// The union of everything actually drawn (device units): a metafile whose
+    /// header bounds carry empty margins (a whole sheet around a small table)
+    /// maps by its ink instead, so the content fills its OLE frame.
+    ink: Bounds2,
     /// Strokes: colour, width in device units, polyline points.
     strokes: Vec<EmfStroke>,
     /// Fills: colour, triangle vertices.
@@ -128,7 +132,7 @@ pub(crate) fn draw_ole_emf(b: &mut Builder, ctx: &Ctx, tags: &[RawTag], frame: &
     // down, drawing y points up, so the frame mapping flips y.
     let (fx0, fx1) = (c[0].x, c[1].x);
     let (fy0, fy1) = (c[2].y, c[0].y);
-    let bounds = parsed.bounds;
+    let bounds = frame_bounds(&parsed);
     let bw = bounds.width();
     let bh = bounds.height();
     if !(bw > 0.0 && bh > 0.0 && bw.is_finite() && bh.is_finite()) {
@@ -178,6 +182,23 @@ pub(crate) fn draw_ole_emf(b: &mut Builder, ctx: &Ctx, tags: &[RawTag], frame: &
         drew = true;
     }
     drew
+}
+
+/// The bounds a preview maps onto its frame by: the ink bounds when the ink
+/// sits inside the header bounds and covers only a small part of them — the
+/// header bounds of an Excel preview cover the whole sheet, not the table, and
+/// mapping by them shrinks the content into a corner of its frame. A preview
+/// whose ink roughly fills its header keeps the header bounds (its size
+/// relationship to the drawing around it is the author's).
+fn frame_bounds(p: &ParsedEmf) -> Bounds2 {
+    let header = p.bounds;
+    let ink = p.ink;
+    let slack = header.width().max(header.height()) * 1e-9 + 1e-9;
+    if !ink.is_empty() && header.expand(slack).contains_box(&ink) && ink.width() < header.width() * 0.6 && ink.height() < header.height() * 0.6 {
+        ink
+    } else {
+        header
+    }
 }
 
 /// Parse (or fetch from cache) the EMF in an entity's 310 groups.
@@ -577,7 +598,32 @@ struct Out {
 
 impl Out {
     fn parsed(self, bounds: Bounds2) -> ParsedEmf {
-        ParsedEmf { bounds, strokes: self.strokes, fills: self.fills, texts: self.texts }
+        let mut ink = Bounds2::EMPTY;
+        for s in &self.strokes {
+            for p in &s.points {
+                ink.add(*p);
+            }
+        }
+        for (_, pts) in &self.fills {
+            for p in pts {
+                ink.add(*p);
+            }
+        }
+        for (_, sh) in &self.texts {
+            for g in &sh.glyphs {
+                for c in g {
+                    for p in c {
+                        ink.add(*p);
+                    }
+                }
+            }
+            for s in &sh.strokes {
+                for p in s {
+                    ink.add(*p);
+                }
+            }
+        }
+        ParsedEmf { bounds, ink, strokes: self.strokes, fills: self.fills, texts: self.texts }
     }
 
     /// Charge `n` points to the budget; false once it is spent.
@@ -2039,6 +2085,28 @@ mod tests {
         assert!(ys.iter().all(|&y| (70.0..=90.0).contains(&y)), "text y range {ys:?}");
         let xs: Vec<f64> = sh.outlines().iter().flatten().map(|p| p.x).collect();
         assert!(xs.iter().all(|&x| x >= 20.0 - 1e-9));
+    }
+
+    #[test]
+    fn ink_bounds_cover_what_was_drawn_and_frame_mapping_prefers_them_over_sheet_margins() {
+        // The sample's ink: rect from (10,10), line to x = 180, text at y 70..90 —
+        // strictly inside its (0,0)-(200,100) header bounds.
+        let parsed = parse_emf(&sample());
+        assert!(!parsed.ink.is_empty());
+        assert_eq!(parsed.ink.min.x, 10.0);
+        assert_eq!(parsed.ink.max.x, 180.0);
+        assert!(parsed.bounds.contains_box(&parsed.ink));
+        // Ink nearly fills the header here, so the header stays the map bounds.
+        assert_eq!(frame_bounds(&parsed), parsed.bounds);
+        // The Excel case: the same content under sheet-sized header bounds maps
+        // by its ink, so the table fills its frame instead of shrinking into a
+        // corner of it.
+        let mut wide = parse_emf(&sample());
+        wide.bounds = Bounds2::new(Vec2::new(0.0, 0.0), Vec2::new(2000.0, 1000.0));
+        assert_eq!(frame_bounds(&wide), wide.ink);
+        // No ink (an empty preview) keeps the header bounds.
+        let empty = ParsedEmf { bounds: wide.bounds, ink: Bounds2::EMPTY, strokes: Vec::new(), fills: Vec::new(), texts: Vec::new() };
+        assert_eq!(frame_bounds(&empty), wide.bounds);
     }
 
     #[test]

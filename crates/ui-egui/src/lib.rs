@@ -27,6 +27,7 @@ pub mod hatchdlg;
 pub mod mapsources;
 mod mtext_editor;
 pub mod spacemouse;
+mod text_editor;
 // The External References palette.
 pub mod xrefs;
 
@@ -260,6 +261,10 @@ pub struct CadApp {
 
 impl CadApp {
     pub fn new(session: Session, services: Services) -> Self {
+        // Fonts resolve before the first display-list build, so the first frame
+        // already shows final glyphs (no missing-glyph flash while the system
+        // font scan and the unified families load lazily).
+        cadcraft_fonts::warm_up();
         CadApp {
             system_languages: Vec::new(),
             system_animations: None,

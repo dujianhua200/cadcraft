@@ -158,7 +158,19 @@ pub fn draw_tilemap_with_hook(
     }
     let Some(georef) = doc.georef else { return };
     let bounds = xf.world_bounds();
-    let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
+    let mut placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
+    // Request far-to-near: the background fetcher's queue is newest-first,
+    // so asking for the far tiles first puts the view-centre tiles — the
+    // ones the user is looking at — at the head of the queue, ahead of
+    // this view's edges and of any stale tiles queued for views already
+    // left. (The quads are disjoint, so the draw order is unaffected.)
+    let centre = Vec2::new((bounds.min.x + bounds.max.x) / 2.0, (bounds.min.y + bounds.max.y) / 2.0);
+    let dist2 = |p: &cadcraft_doc::gis::TilePlacement| {
+        let c = p.corners.iter().fold(Vec2::ZERO, |a, c| a + *c) * 0.25;
+        let d = c - centre;
+        d.x * d.x + d.y * d.y
+    };
+    placements.sort_by(|a, b| dist2(b).total_cmp(&dist2(a)));
     if cache.textures.len() > MAX_TEXTURES {
         cache.textures.clear();
     }
@@ -322,6 +334,49 @@ mod tests {
         assert_eq!(cache2.texture_count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn tilemap_requests_far_to_near() {
+        // The fetcher queue is newest-first, so the canvas asks for the
+        // far tiles first and the view-centre tile last: the centre tile
+        // then heads the fetch queue and lands first after a zoom.
+        let layer = TileLayer::default_osm();
+        let georef = GeoRef::centred(32.1301, 114.0814);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
+        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18 };
+        let bounds = xf.world_bounds();
+        let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
+        assert!(placements.len() > 4, "the test view must span several tiles, got {}", placements.len());
+        let mut d = Drawing::new_metric();
+        d.georef = Some(georef);
+        d.tilemap = Some(layer);
+        let ctx = egui::Context::default();
+        let painter = egui::Painter::new(ctx.clone(), egui::LayerId::background(), rect);
+        let mut cache = TileCache::default();
+        let centre = Vec2::new((bounds.min.x + bounds.max.x) / 2.0, (bounds.min.y + bounds.max.y) / 2.0);
+        let requested: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
+        let load = |_: &TileLayer, _: &cadcraft_doc::gis::TileRef| None;
+        draw_tilemap_with_hook(&mut cache, &d, &painter, &xf, &ctx, &load, &|_: &TileLayer, tile: &cadcraft_doc::gis::TileRef| {
+            if let Some(corners) = cadcraft_doc::gis::tile_corners_for_layer(tile, &georef, cadcraft_doc::gis::CoordType::Wgs84) {
+                let c = corners.iter().fold(Vec2::ZERO, |a, c| a + *c) * 0.25;
+                let dd = c - centre;
+                requested.lock().unwrap_or_else(|e| e.into_inner()).push(dd.x * dd.x + dd.y * dd.y);
+            }
+        });
+        let requested = requested.into_inner().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(requested.len(), placements.len(), "every placement is requested exactly once");
+        assert!(requested.windows(2).all(|w| w[0] >= w[1]), "requests must run far-to-near (non-increasing distance), got {requested:?}");
+        let max_d = placements
+            .iter()
+            .map(|p| {
+                let c = p.corners.iter().fold(Vec2::ZERO, |a, c| a + *c) * 0.25;
+                let dd = c - centre;
+                dd.x * dd.x + dd.y * dd.y
+            })
+            .reduce(f64::max)
+            .unwrap_or(0.0);
+        assert_eq!(requested.first(), Some(&max_d), "the farthest tile is requested first");
     }
 
     #[test]

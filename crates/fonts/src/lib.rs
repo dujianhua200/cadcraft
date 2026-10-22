@@ -19,6 +19,7 @@ mod mtext;
 mod stroke;
 pub mod subset;
 pub mod ttf;
+pub use ttf::warm_up;
 
 use cadcraft_geom::{Bounds2, Vec2};
 
@@ -293,6 +294,27 @@ impl TextFont {
             return TextFont::Stroke;
         }
         ttf::find(&ttf::font_alt()).map(TextFont::Outline).unwrap_or(TextFont::Stroke)
+    }
+    /// Resolve a text style's font with its big font: a style pairing a stroke
+    /// font with a Chinese big font (`txt` + `gbcbig.shx`, `TXT` + `HZTXT`) is
+    /// a Chinese CAD style and resolves to the unified Song face, so its Latin
+    /// and CJK text are one filled family instead of single-stroke hairlines
+    /// next to the drawing's filled TTF text.
+    pub fn resolve_styled(font: &str, big_font: &str) -> TextFont {
+        let f = Self::resolve(font);
+        if f.is_outline() {
+            return f;
+        }
+        let stem = |n: &str| {
+            let k = n.trim().to_ascii_lowercase();
+            k.strip_suffix(".shx").map_or_else(|| k.clone(), str::to_string)
+        };
+        if (ttf::is_cjk_shx(&stem(big_font)) || ttf::is_cjk_shx(&stem(font)))
+            && let Some(face) = ttf::find("simsun")
+        {
+            return TextFont::Outline(face);
+        }
+        f
     }
     pub fn is_outline(&self) -> bool {
         matches!(self, TextFont::Outline(_))
