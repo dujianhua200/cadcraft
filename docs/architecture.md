@@ -61,11 +61,25 @@ selection is ever forced. Standard mode (0) first asks for cutting/boundary edge
 selects all). Fence trims everything the fence path crosses, Crossing everything a window
 touches, and holding Shift while picking flips the pick to the opposite operation (trim ↔
 extend): the UI reports it as `Input::PointShift`, which only TRIM/EXTEND interpret — every
-other command receives it as an ordinary point. Esc cancels (the generic input layer turns it
-into `Step::Cancel`). Remaining differences from AutoCAD, kept deliberately: no freehand
-drag-to-trim path (a drag makes a window instead), Project is recorded but geometrically a
-no-op (drawings are 2D), and the JSON form keeps Standard semantics unless `"mode": "quick"`
-is passed (a programmatic trim that meets no edge is an error, never a silent erase).
+other command receives it as an ordinary point. A freehand drag in the pick (or fence) stage
+is a trim path too: the UI collects the drag as `Input::DragPath` and the command runs it as
+a fence, so everything the path crosses is trimmed (EXTEND: extended) in one step; while
+TRIM/EXTEND waits for picks a drag never opens a selection window (`Session::drag_trim_active`
+tells the UI). Esc cancels (the generic input layer turns it into `Step::Cancel`). Remaining
+differences from AutoCAD, kept deliberately: Project is recorded but geometrically a no-op
+(drawings are 2D), and the JSON form keeps Standard semantics unless `"mode": "quick"` is
+passed (a programmatic trim that meets no edge is an error, never a silent erase).
+
+**Picking.** `select::pick` takes the candidate whose real geometry is nearest the cursor
+within the pick aperture; ties go to the topmost in draw order. Plain text (TEXT, MTEXT,
+ATTDEF) is measured to its glyph ink — inside a glyph outline, or the distance to the
+nearest outline or stroke — not to its frame box: the box spans the gaps between letters
+and the padding above and below the line, so a box hit (distance 0 across the whole box)
+made text swallow every pick of the line work it labels. Inside the frame the text counts
+at most at the distance to the frame's edge, so aiming at the text (its corner, its
+padding) still finds it while line work crossing the interior wins. Text whose layout has
+no ink (empty or spaces only) keeps the frame box. Dimensions and multileaders keep their
+own text boxes over their line geometry.
 
 ## Rendering
 
@@ -155,5 +169,6 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | Picking measured to glyph ink (not the text frame box); TRIM/EXTEND freehand drag path (`Input::DragPath`) |
 | 2026-10-21 | minor | Text and fonts section: unified Song resolution order, OLE EMF text path, double-click in-place editing dispatch, font warm-up timing |
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |

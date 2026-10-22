@@ -81,6 +81,24 @@ fn fence(s: &mut Session, pts: &[Vec2], extending: bool, edges: Edges, quick: bo
     run_picks(s, work, extending, edges, quick, tol)
 }
 
+impl Session {
+    /// TRIM or EXTEND is waiting for objects to trim/extend, or for fence points: the UI
+    /// collects primary drags as [`Input::DragPath`] (a freehand trim path) instead of
+    /// clicks and selection windows, as it does for ZOOM Realtime drags.
+    pub fn drag_trim_active(&self) -> bool {
+        self.running.as_ref().is_some_and(|r| r.id == "trim" || r.id == "extend")
+            && self.current_prompt().is_some_and(|p| {
+                matches!(
+                    p.message.as_str(),
+                    "Select object to trim or shift-select to extend"
+                        | "Select object to extend or shift-select to trim"
+                        | "Specify first fence point"
+                        | "Specify next fence point"
+                )
+            })
+    }
+}
+
 /// Trim (or extend) every object a crossing window from `a` to `b` touches, picked at its point
 /// in the window nearest the first corner `a`.
 fn crossing(s: &mut Session, a: Vec2, b: Vec2, extending: bool, edges: Edges, quick: bool) -> Result<usize> {
@@ -456,6 +474,10 @@ impl Interactive for TrimM {
                         pts.push(p);
                         self.stage = Stage::Fence(pts);
                     }
+                    Input::DragPath(path) => {
+                        pts.extend(path);
+                        self.stage = Stage::Fence(pts);
+                    }
                     Input::Keyword(k) if k == "Undo" => {
                         pts.pop();
                         self.stage = Stage::Fence(pts);
@@ -493,6 +515,17 @@ impl Interactive for TrimM {
                 // Shift held: the opposite operation for this one pick (TRIM extends,
                 // EXTEND trims), as the prompt advertises.
                 Input::PointShift(p) => self.pick_at(s, p, !extending, quick, implied),
+                // A freehand drag across objects: everything the path crosses is
+                // trimmed (or extended), like a fence drawn in one stroke.
+                Input::DragPath(pts) => {
+                    if pts.len() >= 2 {
+                        let r = self.step(s, |m, s| fence(s, &pts, extending, m.edges(quick, implied), quick).map(|_| ()));
+                        if let Err(e) = r {
+                            s.echo(e.to_string());
+                        }
+                    }
+                    Ok(Step::Continue)
+                }
                 Input::Enter => Ok(Step::Done),
                 Input::Keyword(k) => {
                     match k.as_str() {

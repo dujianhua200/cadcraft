@@ -53,8 +53,9 @@ fn textedit_prompt_mode_and_undo() {
     s.cmdline("TEXTEDIT").unwrap();
     let p = s.prompt_text();
     assert!(!p.contains("or or"), "{p}");
-    // Edit, then Undo restores the old text.
-    s.cmdline("0.5,0.5").unwrap();
+    // Edit, then Undo restores the old text. The pick point sits on the 'o' stem:
+    // text picks land on glyph ink now, not anywhere inside the frame.
+    s.cmdline("0,0.5").unwrap();
     s.cmdline("new").unwrap();
     assert_eq!(texts(&s), vec!["new".to_string()]);
     s.cmdline("u").unwrap();
@@ -62,7 +63,7 @@ fn textedit_prompt_mode_and_undo() {
     // Mode Single: the command ends after one edit.
     s.cmdline("m").unwrap();
     s.cmdline("s").unwrap();
-    s.cmdline("0.5,0.5").unwrap();
+    s.cmdline("0,0.5").unwrap();
     s.cmdline("once").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
     assert_eq!(texts(&s), vec!["once".to_string()]);

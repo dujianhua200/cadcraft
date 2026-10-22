@@ -291,7 +291,8 @@ impl GripEdit {
                 }
                 _ => Err(other("Requires a point or an option keyword.")),
             },
-            Input::Pick(_) | Input::Cancel => Ok(Step::Continue),
+            // A freehand drag path means nothing to a grip edit (TRIM/EXTEND only).
+            Input::Pick(_) | Input::DragPath(_) | Input::Cancel => Ok(Step::Continue),
         }
     }
 

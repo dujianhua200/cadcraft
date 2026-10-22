@@ -108,6 +108,8 @@ impl GetRequest {
                 _ => Err("Invalid point.".into()),
             },
             Input::Text(t) => self.text(s, &t),
+            // A freehand drag path answers no getxxx prompt.
+            Input::DragPath(_) => Err("Invalid point.".into()),
             Input::Cancel => Err("*Cancel*".into()),
         }
     }

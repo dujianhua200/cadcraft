@@ -290,7 +290,7 @@ impl Session {
                 self.point_mods.clear();
                 self.input(Input::Cancel)
             }
-            Input::Keyword(_) | Input::Text(_) | Input::Pick(_) => {
+            Input::Keyword(_) | Input::Text(_) | Input::Pick(_) | Input::DragPath(_) => {
                 self.echo("Invalid point.");
                 Ok(())
             }
