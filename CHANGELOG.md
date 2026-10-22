@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-22
+
+### Fixed
+
+- Tile zoom behaviour: zooming out past a certain point blanked the
+  basemap entirely — the tile window was computed from the view
+  corners, and any corner outside the projected world (longitude
+  beyond ±180°) failed the whole window, so nothing was drawn. The
+  window is now clamped to the Web Mercator world; only a view lying
+  entirely outside the world is empty. Zooming in also appeared to
+  shrink the map: a new zoom level needs 129–512 fresh tiles, but
+  the fetch queue was FIFO behind one global rate limiter
+  (~10 tiles/s), so the current view's tiles waited 13–51 s behind
+  hundreds of stale ones. The queue is now newest-first, each fetch
+  worker rate-limits independently (~40 tiles/s aggregate), and the
+  canvas requests far-to-near so centre tiles land first.
+- Font unification (Song family): text no longer mixes filled glyphs
+  and single-line stroke outlines in one drawing. Styles carrying a
+  Chinese SHX bigfont (Standard/HZ) and Office/华文 font names now
+  resolve to 宋体 (Songti SC on macOS), Latin digits included.
+  Double-clicking a TEXT now opens the in-place editor like MTEXT
+  instead of falling back to the command-line `TEXTEDIT` prompt.
+  OLE previews (embedded Excel tables): the frame diagonals are no
+  longer drawn over successfully rendered content, EMF face names go
+  through the same Song resolution (no hollow or overlapping
+  digits), the preview maps by its ink bounds instead of stretching
+  the whole sheet into the frame, and fonts are warmed up at startup
+  so Chinese text no longer shows as tofu blocks on the first frame.
+
 ## [0.10.2] - 2026-10-19
 
 ### Fixed
