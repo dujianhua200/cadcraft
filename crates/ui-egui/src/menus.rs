@@ -186,6 +186,34 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
             }
             Ok(Value::Null)
         }
+        // File ▸ Import ▸ OviMap GeoJSON…: pick the file, run the import, echo the report.
+        // (The engine command itself never opens a picker, per the gis.rs contract.)
+        "ovimap.import" if no_path && app.services.pick_open.is_some() => {
+            if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
+                let r = app.session.execute("ovimap.import", &json!({ "path": p })).map_err(|e| e.to_string());
+                app.session.echo(match &r {
+                    Ok(v) => {
+                        let g = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+                        format!("OviMap import: {} added, {} updated, {} skipped", g("added"), g("updated"), g("skipped"))
+                    }
+                    Err(e) => e.clone(),
+                });
+                r
+            } else {
+                Ok(Value::Null)
+            }
+        }
+        // File ▸ Export ▸ OviMap…: pick the destination, export the GeoJSON envelope.
+        "ovimap.export" if no_path => {
+            let pick = app.services.pick_save.as_ref()?;
+            let Some(path) = pick("drawing.ovimap.geojson") else { return Some(Ok(Value::Null)) };
+            let r = app.session.execute("ovimap.export", &json!({ "path": path })).map_err(|e| e.to_string());
+            app.session.echo(match &r {
+                Ok(_) => format!("Exported OviMap GeoJSON to {path}"),
+                Err(e) => e.clone(),
+            });
+            r
+        }
         "qsave" if no_path && app.session.state().is_ok_and(|s| s.path.is_none()) => return run_ui_command(app, "ui.saveas", &Value::Null),
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot
         // dialog, `managers::route`). JSON calls (scripts, control channel, MCP) always carry
@@ -380,6 +408,12 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
         // Typed or menu-invoked (no parameters) these open their dialogs; JSON calls run the command.
         "qselect" | "qs" if params.is_null() => {
             app.ui.dialog = Some("qselect".into());
+            Ok(Value::Null)
+        }
+        // FIND typed or from Edit ▸ Find... opens the Find and Replace dialog, as in
+        // AutoCAD; JSON calls run the search itself.
+        "find" if params.is_null() => {
+            app.ui.dialog = Some("find".into());
             Ok(Value::Null)
         }
         "units" | "un" if params.is_null() => {

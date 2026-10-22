@@ -271,7 +271,8 @@ impl GripEdit {
                 s.echo(self.label());
                 Ok(Step::Continue)
             }
-            Input::Point(p) => {
+            // A shift-pick is an ordinary point here (the flip only means something to TRIM/EXTEND).
+            Input::Point(p) | Input::PointShift(p) => {
                 let m = self.matrix(p);
                 self.edit(s, p, m)
             }
@@ -290,7 +291,8 @@ impl GripEdit {
                 }
                 _ => Err(other("Requires a point or an option keyword.")),
             },
-            Input::Pick(_) | Input::Cancel => Ok(Step::Continue),
+            // A freehand drag path means nothing to a grip edit (TRIM/EXTEND only).
+            Input::Pick(_) | Input::DragPath(_) | Input::Cancel => Ok(Step::Continue),
         }
     }
 

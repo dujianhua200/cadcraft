@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use super::cells::cell_of;
 use super::{MAX_COLS, MAX_ROWS, anchors, edit, set_anchors, usize_param};
-use crate::cmd::machines::SelectRun;
+use crate::cmd::machines::{SelOutcome, SelectPhase, SelectRun};
 use crate::cmd::{CommandSpec, bad, bool_or, str_param};
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
@@ -24,7 +24,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(BreakM::default()))),
         CommandSpec::new("datalink", "Data Link...", run_datalink)
             .menu(&["Insert", "Data Link..."])
-            .params("{handle, path (.csv, .txt/.tsv tab-separated), startRow? (default: below the title), remove?: bool} → {rows, cols}"),
+            .params("{handle, path (.csv, .txt/.tsv tab-separated), startRow? (default: below the title), remove?: bool} → {rows, cols}")
+            .interactive(|_| Ok(Box::<DatalinkM>::default())),
         CommandSpec::new("datalinkupdate", "Update Data Links", run_update)
             .params("{handles?} (default: every linked table) → {updated}")
             .interactive(|_| Ok(Box::new(SelectRun::new("datalinkupdate", "DATALINKUPDATE")))),
@@ -315,6 +316,72 @@ fn run_datalink(s: &mut Session, p: &Value) -> Result<Value> {
     let h = r.get("handle").and_then(Value::as_str).and_then(Handle::parse_hex).ok_or_else(|| bad(id, "no table"))?;
     let (rows, cols) = update(s, h)?;
     Ok(json!({ "handle": h.hex(), "rows": rows, "cols": cols }))
+}
+
+/// DATALINK typed (audit F-class): AutoCAD opens the Data Link Manager; the prompt
+/// flow is: select the table, then give the CSV path (loaded at once, like the
+/// manager's OK).
+#[derive(Default)]
+pub struct DatalinkM {
+    sel: SelectPhase,
+    begun: bool,
+    table: Option<Handle>,
+}
+
+impl Interactive for DatalinkM {
+    fn name(&self) -> &'static str {
+        "DATALINK"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.table {
+            Some(_) => Prompt::new("Enter CSV file path", Accept::TEXT),
+            None => Prompt::new("Select a table", Accept::SELECT),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.table.is_none() {
+            if !self.begun {
+                self.begun = true;
+                let b = SelectPhase::begin(s);
+                if b.done {
+                    self.table = b.picked.first().copied();
+                    self.sel = b;
+                    return Ok(if self.table.is_some() { Step::Continue } else { Step::Done });
+                }
+                self.sel = SelectPhase { single: true, ..b };
+            }
+            return match self.sel.feed(s, &i)? {
+                SelOutcome::More => Ok(Step::Continue),
+                SelOutcome::Empty => Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.table = hs.first().copied();
+                    Ok(if self.table.is_some() { Step::Continue } else { Step::Done })
+                }
+            };
+        }
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Text(t) => {
+                let path = t.trim().to_string();
+                if path.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                let h = self.table.map(|h| h.hex()).unwrap_or_default();
+                match run_datalink(s, &json!({ "handle": h, "path": path })) {
+                    Ok(r) => {
+                        let (rows, cols) = (r.get("rows").and_then(Value::as_u64).unwrap_or(0), r.get("cols").and_then(Value::as_u64).unwrap_or(0));
+                        s.echo(format!("Table linked: {rows} row(s) x {cols} column(s) loaded from {path}."));
+                        Ok(Step::Done)
+                    }
+                    Err(e) => {
+                        s.echo(e.to_string());
+                        Ok(Step::Continue)
+                    }
+                }
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
 }
 
 fn run_update(s: &mut Session, p: &Value) -> Result<Value> {

@@ -131,9 +131,11 @@ mod tests {
         app.start("textedit");
         let d = app.session.doc().unwrap();
         let e = d.model.iter().find(|e| matches!(&e.kind, cadcraft_engine::doc::EntityKind::Text(_))).unwrap().clone();
-        let centre = cadcraft_doc::entity_bounds(d, &e, 0).center();
+        let b = cadcraft_doc::entity_bounds(d, &e, 0);
+        // On the first letter's stem: text picks land on glyph ink now, not the frame.
+        let on_ink = cadcraft_engine::geom::Vec2::new(b.min.x + b.width() * 0.03, b.center().y);
         let _ = d;
-        app.session.input(cadcraft_engine::Input::Point(centre)).unwrap();
+        app.session.input(cadcraft_engine::Input::Point(on_ink)).unwrap();
         assert!(app.session.editing_text().is_some(), "textedit offers the picked text");
         frame(&mut app);
         let st = ctx.data_mut(|d| d.get_temp::<State>(state_id())).expect("editor open for textedit on a TEXT");

@@ -44,8 +44,14 @@ pub fn specs() -> Vec<CommandSpec> {
             .interactive(|_| Ok(Box::new(AttdefM::default()))),
         attedit::attedit_spec(),
         attedit::dash_attedit_spec(),
-        CommandSpec::new("wblock", "Write Block", run_wblock).alias(&["w"]).params("{path, name? | handles?, base?}"),
-        CommandSpec::new("base", "Base", run_base).menu(&["Draw", "Block", "Base"]).params("{at: [x,y]}"),
+        CommandSpec::new("wblock", "Write Block", run_wblock)
+            .alias(&["w"])
+            .params("{path, name? | handles?, base?}")
+            .interactive(|_| Ok(Box::<WblockM>::default())),
+        CommandSpec::new("base", "Base", run_base)
+            .menu(&["Draw", "Block", "Base"])
+            .params("{at: [x,y]}")
+            .interactive(|_| Ok(Box::<BaseM>::default())),
         CommandSpec::new("blocks.dynamic", "Dynamic Block Data", run_dynamic)
             .params("{name (a block, or \"*Model_Space\" for a drawing that is a dynamic block's own)} → {parameters, actions, other} | null (not a dynamic block)")
             .enabled(has_doc)
@@ -342,6 +348,164 @@ fn run_wblock(s: &mut Session, p: &Value) -> Result<Value> {
     #[cfg(not(target_arch = "wasm32"))]
     std::fs::write(&path, &bytes).map_err(|e| bad("wblock", format!("{path}: {e}")))?;
     Ok(json!({ "path": path, "entities": d.model.len(), "bytes": bytes.len() }))
+}
+
+/// WBLOCK typed (audit F-class): AutoCAD shows the Write Block dialog; the prompt
+/// flow is name (blank = pick objects, `*` = whole drawing) → base point → file.
+#[derive(Default)]
+pub struct WblockM {
+    /// 0 name, 1 select, 2 base point, 3 file path.
+    phase: u8,
+    sel: SelectPhase,
+    name: Option<String>,
+    whole: bool,
+    handles: Vec<Handle>,
+    base: Option<Vec2>,
+}
+
+impl Interactive for WblockM {
+    fn name(&self) -> &'static str {
+        "WBLOCK"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.phase {
+            0 => Prompt::new("Enter block name (blank = select objects, * = whole drawing)", Accept::TEXT),
+            1 => self.sel.prompt(),
+            2 => Prompt::new("Specify insertion base point", Accept::POINT),
+            _ => Prompt::new("Enter file name", Accept::TEXT),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match self.phase {
+            0 => match i {
+                Input::Cancel => Ok(Step::Done),
+                Input::Enter => {
+                    self.phase = 1;
+                    Ok(Step::Continue)
+                }
+                Input::Text(t) => {
+                    let t = t.trim().to_string();
+                    if t == "*" {
+                        self.whole = true;
+                        self.phase = 3;
+                    } else if t.is_empty() {
+                        self.phase = 1;
+                    } else if s.doc()?.block(&t).is_some() {
+                        self.name = Some(t);
+                        self.phase = 3;
+                    } else {
+                        s.echo(format!("No block named {t}."));
+                        return Ok(Step::Continue);
+                    }
+                    Ok(Step::Continue)
+                }
+                _ => Ok(Step::Continue),
+            },
+            1 => match self.sel.feed(s, &i)? {
+                SelOutcome::More => Ok(Step::Continue),
+                SelOutcome::Empty => Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.handles = hs;
+                    self.phase = 2;
+                    Ok(Step::Continue)
+                }
+            },
+            2 => match i {
+                Input::Point(p) => {
+                    self.base = Some(p);
+                    self.phase = 3;
+                    Ok(Step::Continue)
+                }
+                Input::Enter => {
+                    self.base = Some(Vec2::ZERO);
+                    self.phase = 3;
+                    Ok(Step::Continue)
+                }
+                Input::Cancel => Ok(Step::Done),
+                _ => Ok(Step::Continue),
+            },
+            _ => match i {
+                Input::Cancel => Ok(Step::Done),
+                Input::Text(t) => {
+                    let path = t.trim().to_string();
+                    if path.is_empty() {
+                        return Ok(Step::Continue);
+                    }
+                    let mut p = json!({ "path": path });
+                    if self.whole {
+                        // Whole drawing = every model-space entity, base at the origin.
+                        let all: Vec<String> = s.doc()?.model.iter().map(|e| e.handle.hex()).collect();
+                        p["handles"] = json!(all);
+                        p["base"] = json!([0.0, 0.0]);
+                    } else if let Some(n) = &self.name {
+                        p["name"] = json!(n);
+                    } else {
+                        p["handles"] = json!(self.handles.iter().map(|h| h.hex()).collect::<Vec<_>>());
+                        let b = self.base.unwrap_or(Vec2::ZERO);
+                        p["base"] = json!([b.x, b.y]);
+                    }
+                    match run_wblock(s, &p) {
+                        Ok(r) => {
+                            let n = r.get("entities").and_then(Value::as_u64).unwrap_or(0);
+                            s.echo(format!("{n} object(s) written to {path}."));
+                            Ok(Step::Done)
+                        }
+                        Err(e) => {
+                            s.echo(e.to_string());
+                            Ok(Step::Continue)
+                        }
+                    }
+                }
+                _ => Ok(Step::Continue),
+            },
+        }
+    }
+}
+
+/// BASE typed (audit F-class): "Specify base point:" sets INSBASE.
+#[derive(Default)]
+pub struct BaseM;
+
+impl Interactive for BaseM {
+    fn name(&self) -> &'static str {
+        "BASE"
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        let cur =
+            s.doc().ok().and_then(|d| d.header.point("INSBASE")).map(|p| format!("{},{}", fmt_xy(p.x), fmt_xy(p.y))).unwrap_or_else(|| "0,0".into());
+        Prompt::new("Specify base point", Accept::POINT).default(cur)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Point(p) => {
+                run_base(s, &json!({ "at": [p.x, p.y] }))?;
+                Ok(Step::Done)
+            }
+            Input::Enter => {
+                let cur = s.doc()?.header.point("INSBASE");
+                let (x, y) = cur.map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+                run_base(s, &json!({ "at": [x, y] }))?;
+                Ok(Step::Done)
+            }
+            Input::Text(t) => match crate::prompt::parse_point(t.trim(), Vec2::ZERO) {
+                Some(p) => {
+                    run_base(s, &json!({ "at": [p.x, p.y] }))?;
+                    Ok(Step::Done)
+                }
+                None => {
+                    s.echo("*Invalid point*");
+                    Ok(Step::Continue)
+                }
+            },
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+fn fmt_xy(v: f64) -> String {
+    let t = format!("{v:.4}");
+    if t.contains('.') { t.trim_end_matches('0').trim_end_matches('.').to_string() } else { t }
 }
 
 fn run_base(s: &mut Session, p: &Value) -> Result<Value> {

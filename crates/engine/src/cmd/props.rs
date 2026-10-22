@@ -11,7 +11,7 @@ use cadcraft_geom::Vec3;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -22,21 +22,36 @@ pub fn specs() -> Vec<CommandSpec> {
             .alias(&["ma", "painter"])
             .params("{source, targets?: [hex] (default: selection), properties?: [name] | {name: bool} (default: all; names: color, layer, linetype, ltscale, lineweight, transparency, thickness, plotStyle, dimension, text, hatch, polyline, viewport, table, multileader)} → {changed}")
             .interactive(|_| Ok(Box::new(matchprop::MatchPropM::new()))),
-        CommandSpec::new("color", "Color...", run_color).menu(&["Format", "Color..."]).alias(&["col", "colour"]).params("{color: \"ByLayer\" | \"red\" | 1..255 | \"r,g,b\"}"),
+        CommandSpec::new("color", "Color...", run_color)
+            .menu(&["Format", "Color..."])
+            .alias(&["col", "colour"])
+            .params("{color: \"ByLayer\" | \"red\" | 1..255 | \"r,g,b\"}")
+            .interactive(|_| Ok(Box::<ColorM>::default())),
         CommandSpec::new("linetype", "Linetype...", run_linetype).menu(&["Format", "Linetype..."]).alias(&["lt", "ltype"]).params("{current?: name, load?: name | \"*\" (with a file: comma-separated names, wildcards), file?: path to a .lin file | text?: its contents, reload?: bool}"),
         CommandSpec::new("hatch.patterns", "Hatch Patterns", super::hatch::run_patterns)
             .params("{file?: path to a .pat file | text?: its contents, clear?: bool} → {standard, user, added, warnings} (HATCH also takes patternFile | patternText)")
             .enabled(always)
             .noundo(),
         CommandSpec::new("-linetype", "Linetype", run_linetype).params("{current?, load?, file? | text?, reload?} (as LINETYPE)").interactive(|_| Ok(Box::new(linfile::DashLinetype::new()))),
-        CommandSpec::new("lweight", "Lineweight...", run_lweight).menu(&["Format", "Lineweight..."]).alias(&["lw", "lineweight"]).params("{lineweight: mm | ByLayer}"),
-        CommandSpec::new("ltscale", "Linetype Scale", run_ltscale).alias(&["lts"]).params("{scale}"),
+        CommandSpec::new("lweight", "Lineweight...", run_lweight)
+            .menu(&["Format", "Lineweight..."])
+            .alias(&["lw", "lineweight"])
+            .params("{lineweight: mm | ByLayer}")
+            .interactive(|_| Ok(Box::<LweightM>::default())),
+        CommandSpec::new("ltscale", "Linetype Scale", run_ltscale)
+            .alias(&["lts"])
+            .params("{scale}")
+            .interactive(|_| Ok(Box::<LtscaleM>::default())),
         CommandSpec::new("units", "Units...", run_units).menu(&["Format", "Units..."]).alias(&["un"]).params("{lunits?: 1..5, luprec?: 0..8, aunits?: 0..4, auprec?: 0..8, insunits?}"),
-        CommandSpec::new("limits", "Drawing Limits", run_limits).menu(&["Format", "Drawing Limits"]).params("{min: [x,y], max: [x,y]}"),
+        CommandSpec::new("limits", "Drawing Limits", run_limits)
+            .menu(&["Format", "Drawing Limits"])
+            .params("{min: [x,y], max: [x,y]}")
+            .interactive(|_| Ok(Box::<LimitsM>::default())),
         CommandSpec::new("style", "Text Style...", run_style)
             .menu(&["Format", "Text Style..."])
             .alias(&["st"])
-            .params("{name, font?, bigFont?, height?, widthFactor?, oblique? (degrees), backwards?, upsideDown?, vertical?, annotative?, current?} → styles"),
+            .params("{name, font?, bigFont?, height?, widthFactor?, oblique? (degrees), backwards?, upsideDown?, vertical?, annotative?, current?} → styles")
+            .interactive(|_| Ok(Box::<StyleM>::default())),
         CommandSpec::new("style.list", "List Text Styles", run_style_list).params("{} → text styles").noundo(),
         CommandSpec::new("style.rename", "Rename Text Style", run_style_rename).params("{from, to}"),
         CommandSpec::new("style.delete", "Delete Text Style", run_style_delete).params("{name} (not Standard, the current style or one in use)"),
@@ -44,8 +59,12 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("dimstyle", "Dimension Style...", run_dimstyle)
             .menu(&["Format", "Dimension Style..."])
             .alias(&["d", "dst", "ddim"])
-            .params("{name, current?, <style fields or DIM* variables, e.g. arrowSize / DIMASZ, DIMTSZ, DIMBLK, DIMTAD, DIMLUNIT…>} → styles"),
-        CommandSpec::new("dimstyle.dimension", "Dimension Style...", run_dimstyle).menu(&["Dimension", "Dimension Style..."]).params("same as `dimstyle`"),
+            .params("{name, current?, <style fields or DIM* variables, e.g. arrowSize / DIMASZ, DIMTSZ, DIMBLK, DIMTAD, DIMLUNIT…>} → styles")
+            .interactive(|_| Ok(Box::<DimstyleM>::default())),
+        CommandSpec::new("dimstyle.dimension", "Dimension Style...", run_dimstyle)
+            .menu(&["Dimension", "Dimension Style..."])
+            .params("same as `dimstyle`")
+            .interactive(|_| Ok(Box::<DimstyleM>::default())),
         CommandSpec::new("dimstyle.list", "List Dimension Styles", run_dimstyle_list).params("{name?} → styles (with all variables for `name`)").noundo(),
         CommandSpec::new("dimstyle.rename", "Rename Dimension Style", run_dimstyle_rename).params("{from, to}"),
         CommandSpec::new("dimstyle.delete", "Delete Dimension Style", run_dimstyle_delete).params("{name} (not Standard, the current style or one in use)"),
@@ -1017,6 +1036,304 @@ fn run_rename(s: &mut Session, p: &Value) -> Result<Value> {
         _ => return Err(bad("rename", "unsupported table")),
     }
     ok()
+}
+
+// ---------- Typed fallbacks for the dialog commands (audit F-class) ----------
+//
+// COLOR / LWEIGHT / LTSCALE / LIMITS / STYLE open dialogs in the GUI (STYLE via the
+// Text Style manager; the others have no dialog yet). Typed at the command line — and
+// in the headless CLI, which has no dialogs — they must still work, so each has a
+// prompt machine driving the same JSON form. DIMSTYLE gets the -DIMSTYLE prompt flow
+// (the full Dimension Style Manager dialog remains gaps F7).
+
+fn fmt_num(v: f64) -> String {
+    let t = format!("{v:.4}");
+    if t.contains('.') { t.trim_end_matches('0').trim_end_matches('.').to_string() } else { t }
+}
+
+/// COLOR typed: "Enter color name or number, or [ByLayer/ByBlock/TrueColor]".
+#[derive(Default)]
+pub struct ColorM {
+    rgb: bool,
+}
+
+impl Interactive for ColorM {
+    fn name(&self) -> &'static str {
+        "COLOR"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.rgb {
+            Prompt::new("Enter RGB value (red,green,blue)", Accept::TEXT)
+        } else {
+            Prompt::new("Enter color name or number", Accept::TEXT).kw(&["ByLayer", "ByBlock", "TrueColor"])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Enter if !self.rgb => Ok(Step::Done),
+            Input::Keyword(k) if k == "TrueColor" => {
+                self.rgb = true;
+                Ok(Step::Continue)
+            }
+            Input::Keyword(k) => {
+                run_color(s, &json!({ "color": k }))?;
+                s.echo(format!("Current color: {k}"));
+                Ok(Step::Done)
+            }
+            Input::Text(t) => {
+                let t = t.trim();
+                if t.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                let v = if self.rgb {
+                    json!(t)
+                } else if let Ok(n) = t.parse::<i64>() {
+                    json!(n)
+                } else {
+                    json!(t)
+                };
+                if parse_color(&v).is_none() {
+                    s.echo("*Invalid color*");
+                    return Ok(Step::Continue);
+                }
+                run_color(s, &json!({ "color": v }))?;
+                s.echo(format!("Current color: {t}"));
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+/// LWEIGHT typed: a millimetre value or [ByLayer/ByBlock/Default].
+#[derive(Default)]
+pub struct LweightM;
+
+impl Interactive for LweightM {
+    fn name(&self) -> &'static str {
+        "LWEIGHT"
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        let cur = s.doc().map(|d| fmt_num(d.header.f64("CELWEIGHT", -1.0))).unwrap_or_default();
+        Prompt::new("Enter lineweight", Accept::TEXT).kw(&["ByLayer", "ByBlock", "Default"]).default(cur)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let t = match i {
+            Input::Cancel => return Ok(Step::Done),
+            Input::Keyword(k) => k,
+            Input::Text(t) => t.trim().to_string(),
+            _ => return Ok(Step::Continue),
+        };
+        if t.is_empty() {
+            return Ok(Step::Continue);
+        }
+        let v = if let Ok(n) = t.parse::<f64>() { json!(n) } else { json!(t) };
+        match run_lweight(s, &json!({ "lineweight": v })) {
+            Ok(_) => {
+                s.echo(format!("Current lineweight: {t}"));
+                Ok(Step::Done)
+            }
+            Err(e) => {
+                s.echo(e.to_string());
+                Ok(Step::Continue)
+            }
+        }
+    }
+}
+
+/// LTSCALE typed: "Enter new linetype scale <current>:".
+#[derive(Default)]
+pub struct LtscaleM;
+
+impl Interactive for LtscaleM {
+    fn name(&self) -> &'static str {
+        "LTSCALE"
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        let cur = s.doc().map(|d| d.header.f64("LTSCALE", 1.0)).unwrap_or(1.0);
+        Prompt::new("Enter new linetype scale", Accept { number: true, ..Accept::TEXT }).default(fmt_num(cur))
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Enter => {
+                // Enter keeps the current scale (the JSON default would reset it to 1).
+                let cur = s.doc()?.header.f64("LTSCALE", 1.0);
+                let r = run_ltscale(s, &json!({ "scale": cur }))?;
+                if let Some(m) = r.get("message").and_then(Value::as_str) {
+                    s.echo(m);
+                }
+                Ok(Step::Done)
+            }
+            Input::Text(t) => match super::machines::number(t.trim()) {
+                Some(v) if v > 0.0 => {
+                    let r = run_ltscale(s, &json!({ "scale": v }))?;
+                    if let Some(m) = r.get("message").and_then(Value::as_str) {
+                        s.echo(m);
+                    }
+                    Ok(Step::Done)
+                }
+                _ => {
+                    s.echo("Scale must be a positive number.");
+                    Ok(Step::Continue)
+                }
+            },
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+/// LIMITS typed: two corners, with ON/OFF switching limit checking (LIMCHECK).
+#[derive(Default)]
+pub struct LimitsM {
+    min: Option<(f64, f64)>,
+}
+
+impl Interactive for LimitsM {
+    fn name(&self) -> &'static str {
+        "LIMITS"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        match self.min {
+            None => Prompt::new("Specify lower left corner", Accept::POINT).kw(&["ON", "OFF"]),
+            Some(_) => Prompt::new("Specify upper right corner", Accept::POINT),
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Keyword(k) if self.min.is_none() => {
+                let on = k == "ON";
+                s.doc_mut()?.header.set_i64("LIMCHECK", i64::from(on));
+                s.echo(if on { "Limits checking on." } else { "Limits checking off." });
+                Ok(Step::Done)
+            }
+            Input::Point(p) => match self.min {
+                None => {
+                    self.min = Some((p.x, p.y));
+                    Ok(Step::Continue)
+                }
+                Some(mn) => {
+                    run_limits(s, &json!({ "min": [mn.0, mn.1], "max": [p.x, p.y] }))?;
+                    Ok(Step::Done)
+                }
+            },
+            Input::Enter => {
+                // Enter accepts the current corner and moves on / finishes.
+                let d = s.doc()?;
+                match self.min {
+                    None => {
+                        let mn = d.header.point("LIMMIN").map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+                        self.min = Some(mn);
+                        Ok(Step::Continue)
+                    }
+                    Some(mn) => {
+                        let mx = d.header.point("LIMMAX").map(|p| (p.x, p.y)).unwrap_or((420.0, 297.0));
+                        run_limits(s, &json!({ "min": [mn.0, mn.1], "max": [mx.0, mx.1] }))?;
+                        Ok(Step::Done)
+                    }
+                }
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+/// STYLE typed: "Enter text style name [?]:" — a name creates-or-selects it as
+/// current (the JSON semantics); "?" lists the styles. The GUI opens the manager.
+#[derive(Default)]
+pub struct StyleM;
+
+impl Interactive for StyleM {
+    fn name(&self) -> &'static str {
+        "STYLE"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Enter text style name", Accept::TEXT).kw(&["?"])
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel | Input::Enter => Ok(Step::Done),
+            Input::Keyword(k) if k == "?" => {
+                let cur = s.doc()?.header.str("TEXTSTYLE", "Standard").to_string();
+                let names: Vec<String> = s.doc()?.text_styles.iter().map(|t| t.name.clone()).collect();
+                for n in names {
+                    s.echo(if n.eq_ignore_ascii_case(&cur) { format!("{n}  (current)") } else { n });
+                }
+                Ok(Step::Continue)
+            }
+            Input::Text(t) => {
+                let t = t.trim().to_string();
+                if t.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                run_style(s, &json!({ "name": t }))?;
+                s.echo(format!("{t} is now the current text style."));
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+/// -DIMSTYLE typed: name to make current, [Save/List] to create from the current
+/// dimension variables or list the styles.
+#[derive(Default)]
+pub struct DimstyleM {
+    save: bool,
+}
+
+impl Interactive for DimstyleM {
+    fn name(&self) -> &'static str {
+        "-DIMSTYLE"
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        if self.save {
+            Prompt::new("Enter name for the new dimension style", Accept::TEXT)
+        } else {
+            let cur = s.doc().map(|d| d.header.str("DIMSTYLE", "Standard").to_string()).unwrap_or_default();
+            Prompt::new("Enter dimension style name", Accept::TEXT).kw(&["Save", "List"]).default(cur)
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Enter if !self.save => Ok(Step::Done),
+            Input::Keyword(k) if k == "List" => {
+                let names: Vec<String> = s.doc()?.dim_styles.iter().map(|t| t.name.clone()).collect();
+                let cur = s.doc()?.header.str("DIMSTYLE", "Standard").to_string();
+                for n in names {
+                    s.echo(if n.eq_ignore_ascii_case(&cur) { format!("{n}  (current)") } else { n });
+                }
+                Ok(Step::Continue)
+            }
+            Input::Keyword(k) if k == "Save" => {
+                self.save = true;
+                Ok(Step::Continue)
+            }
+            Input::Text(t) => {
+                let t = t.trim().to_string();
+                if t.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                if self.save {
+                    run_dimstyle(s, &json!({ "name": t, "current": false }))?;
+                    s.echo(format!("Dimension style saved as {t}."));
+                    return Ok(Step::Done);
+                }
+                let exists = s.doc()?.dim_styles.iter().any(|d| d.name.eq_ignore_ascii_case(&t));
+                if !exists {
+                    s.echo(format!("No dimension style named {t}. Use Save to create it."));
+                    return Ok(Step::Continue);
+                }
+                run_dimstyle_current(s, &json!({ "name": t }))?;
+                s.echo(format!("{t} is now the current dimension style."));
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -812,6 +812,15 @@ fn cap_height(f: &FontRef) -> f64 {
     f64::from(cap).max(1.0)
 }
 
+/// The face's cap height as a fraction of its em, in (0, 1]: the factor that turns a
+/// GDI-style em height (LOGFONT `|lfHeight|`) into this crate's cap-height text size.
+/// `None` when the face does not parse.
+pub fn cap_ratio(face: &Face) -> Option<f64> {
+    let f = face.font()?;
+    let r = cap_height(&f) / f64::from(UPEM);
+    (r.is_finite() && r > 0.0).then(|| r.min(1.0))
+}
+
 /// The outline of `c` in `face` (its missing-glyph shape when unmapped; empty when the face
 /// doesn't parse).
 pub(crate) fn glyph(face: &Face, c: char) -> Arc<GlyphOutline> {
