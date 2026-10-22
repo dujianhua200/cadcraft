@@ -23,6 +23,7 @@ pub mod credits;
 pub mod dcl_dialog;
 pub mod dialogs;
 pub mod docking;
+pub mod find;
 pub mod hatchdlg;
 pub mod mapsources;
 mod mtext_editor;
