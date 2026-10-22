@@ -10,8 +10,10 @@
 //! * **Policy**: the request carries the app's real User-Agent
 //!   ([`USER_AGENT`], never a browser UA), `Accept: image/*`, and a per-request
 //!   timeout. Requests are cache-first (a fresh tile is never re-fetched), at
-//!   most 4 concurrent (4 worker threads), and spaced at least
-//!   [`FetchOptions::min_gap`] apart, so panning is not a bulk download.
+//!   most 4 concurrent (4 worker threads), and each worker spaces its own
+//!   request starts at least [`FetchOptions::min_gap`] apart, so panning is
+//!   not a bulk download. The queue is newest-first: the tiles of the view
+//!   on screen are fetched before tiles queued for views already left.
 //!   The zoom cap is enforced before any request: the OSM default never asks
 //!   for z > 19 (§9.1).
 //! * **Cache**: [`cadcraft_io::geojson`]'s disk cache is reused verbatim
@@ -59,15 +61,18 @@ const MAX_TILE_BYTES: usize = 1 << 20;
 const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Worker threads: the concurrency cap (§9.1, ≤ 4).
 const WORKERS: usize = 4;
-/// Most tiles waiting in the fetch queue. A pan enqueues a whole new view's
-/// tiles every frame; without a bound, a few pans bury the current view's
-/// tiles behind hundreds of stale ones (FIFO) and the map stops following
-/// the pan for minutes. Past the cap the oldest queued tiles are dropped —
-/// safe, because the canvas re-requests the tiles it still needs every
-/// frame: a dropped tile for an abandoned view never comes back, a dropped
-/// tile for the current view is re-queued at once. Dropped keys are
-/// removed from `in_flight` too, or the dedup would block the re-request
-/// forever (a permanent blank).
+/// Most tiles waiting in the fetch queue. A pan or zoom enqueues a whole
+/// new view's tiles every frame; without a bound, a few pans bury the
+/// current view's tiles behind hundreds of stale ones and the map stops
+/// following the view for minutes. The queue is therefore newest-first
+/// (workers take from the front, where the newest requests land): the
+/// tiles of the view on screen are fetched before tiles queued for views
+/// already left. Past the cap the oldest queued tiles (the back) are
+/// dropped — safe, because the canvas re-requests the tiles it still
+/// needs every frame: a dropped tile for an abandoned view never comes
+/// back, a dropped tile for the current view is re-queued at once.
+/// Dropped keys are removed from `in_flight` too, or the dedup would
+/// block the re-request forever (a permanent blank).
 const MAX_QUEUE: usize = 512;
 
 /// Fetch tuning. The defaults are the production policy; tests pass small
@@ -234,8 +239,13 @@ struct Shared {
     queue: Mutex<VecDeque<(TileLayer, TileRef)>>,
     notify: Condvar,
     in_flight: Mutex<HashSet<String>>,
-    /// Start time of the last request (rate limiting).
-    last_start: Mutex<Instant>,
+    /// Start time of each worker's last request (rate limiting, one slot
+    /// per worker: the *concurrency cap* is the politeness bound, so the
+    /// workers pace themselves individually instead of serialising every
+    /// request through one global pacer — a freshly zoomed view needs
+    /// hundreds of tiles, and a single global 100 ms pacer took tens of
+    /// seconds to fill it, leaving a small fetched patch on screen).
+    last_starts: Mutex<Vec<Instant>>,
     /// Set when a worker finished a tile: the canvas repaints to show it.
     dirty: AtomicBool,
     opts: FetchOptions,
@@ -254,18 +264,19 @@ impl TileFetcher {
     /// A spawn failure degrades to no fetching (the canvas keeps its cache),
     /// never an error.
     pub fn new(workers: usize, opts: FetchOptions) -> Self {
+        let workers = workers.clamp(1, WORKERS);
         let inner = Arc::new(Shared {
             queue: Mutex::new(VecDeque::new()),
             notify: Condvar::new(),
             in_flight: Mutex::new(HashSet::new()),
-            last_start: Mutex::new(Instant::now() - opts.min_gap),
+            last_starts: Mutex::new(vec![Instant::now() - opts.min_gap; workers]),
             dirty: AtomicBool::new(false),
             opts,
         });
         #[cfg(not(target_arch = "wasm32"))]
-        for i in 0..workers.clamp(1, WORKERS) {
+        for i in 0..workers {
             let shared = Arc::clone(&inner);
-            let _ = std::thread::Builder::new().name(format!("cadcraft-tilefetch-{i}")).spawn(move || worker(&shared));
+            let _ = std::thread::Builder::new().name(format!("cadcraft-tilefetch-{i}")).spawn(move || worker(&shared, i));
         }
         TileFetcher { inner }
     }
@@ -301,12 +312,18 @@ impl TileFetcher {
             }
             {
                 let mut queue = poisoned(self.inner.queue.lock());
-                queue.push_back((layer.clone(), tile.clone()));
-                // Drop stale queued tiles past the cap (oldest first: they
-                // belong to abandoned views), freeing their dedup keys so a
+                // Newest first: workers take from the front, so a tile the
+                // user is looking at *now* (a zoom just landed on a fresh
+                // level) jumps ahead of tiles queued for views already
+                // left — with a plain FIFO the current view waited behind
+                // hundreds of stale fetches and the map shrank to whatever
+                // small patch had completed.
+                queue.push_front((layer.clone(), tile.clone()));
+                // Drop stale queued tiles past the cap (the back is the
+                // oldest: abandoned views), freeing their dedup keys so a
                 // re-request for a tile still needed can queue it again.
                 while queue.len() > MAX_QUEUE {
-                    if let Some((old_layer, old_tile)) = queue.pop_front() {
+                    if let Some((old_layer, old_tile)) = queue.pop_back() {
                         let old_key = tile_cache_rel_path(&old_layer, &old_tile);
                         poisoned(self.inner.in_flight.lock()).remove(&old_key);
                     } else {
@@ -339,7 +356,7 @@ impl TileFetcher {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn worker(shared: &Arc<Shared>) {
+fn worker(shared: &Arc<Shared>, index: usize) {
     loop {
         let (layer, tile) = {
             let mut queue = poisoned(shared.queue.lock());
@@ -351,20 +368,30 @@ fn worker(shared: &Arc<Shared>) {
                 None => continue,
             }
         };
-        // Rate limit: space request starts by at least `min_gap`.
+        // Rate limit: this worker spaces its own request starts by at
+        // least `min_gap` (slot `index`); the ≤4-worker cap remains the
+        // overall concurrency bound (§9.1).
         let wait = {
-            let mut last = poisoned(shared.last_start.lock());
+            let mut starts = poisoned(shared.last_starts.lock());
             let now = Instant::now();
-            let elapsed = now.duration_since(*last);
-            let wait = if elapsed < shared.opts.min_gap { shared.opts.min_gap - elapsed } else { Duration::ZERO };
-            if wait.is_zero() {
-                *last = now;
+            match starts.get_mut(index) {
+                Some(last) => {
+                    let elapsed = now.duration_since(*last);
+                    let wait = if elapsed < shared.opts.min_gap { shared.opts.min_gap - elapsed } else { Duration::ZERO };
+                    if wait.is_zero() {
+                        *last = now;
+                    }
+                    wait
+                }
+                None => Duration::ZERO,
             }
-            wait
         };
         if !wait.is_zero() {
             std::thread::sleep(wait);
-            *poisoned(shared.last_start.lock()) = Instant::now();
+            let mut starts = poisoned(shared.last_starts.lock());
+            if let Some(last) = starts.get_mut(index) {
+                *last = Instant::now();
+            }
         }
         let _ = fetch_tile_cached(&layer, &tile, shared.opts);
         {

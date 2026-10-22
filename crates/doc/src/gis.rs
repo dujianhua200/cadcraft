@@ -449,27 +449,77 @@ pub fn lonlat_to_tile(lon: f64, lat: f64, z: u32) -> Option<(u32, u32)> {
     Some((x as u32, y as u32))
 }
 
+/// Highest latitude Web-Mercator tiles cover (the `lonlat_to_tile` clamp).
+const MERCATOR_MAX_LAT: f64 = 85.051_128_78;
+
+/// One view corner's lon/lat for [`tiles_for_view`]. A corner past the edge
+/// of the projected world (zoomed far out, or panned past the antimeridian)
+/// fails to unproject; it is treated as the world edge on its side, so an
+/// over-wide view still gets the tiles covering its in-world part instead
+/// of no tiles at all.
+fn view_corner_lonlat(georef: &GeoRef, p: Vec2) -> (f64, f64) {
+    match georef.unproject(p) {
+        Some((lon, lat)) => (lon, lat),
+        None => (if p.x >= 0.0 { 180.0 } else { -180.0 }, if p.y >= 0.0 { MERCATOR_MAX_LAT } else { -MERCATOR_MAX_LAT }),
+    }
+}
+
 /// Tiles covering a CAD view (`min`/`max` in drawing units). With no explicit zoom, the
 /// finest zoom (up to the layer's `max_zoom`) whose tile count fits [`MAX_TILES`] is
 /// used. A requested zoom above `max_zoom` is served from `max_zoom` (zoomed display,
-/// never a request above the cap, §9.1). Errors are in Chinese.
+/// never a request above the cap, §9.1). The view window is clamped to the
+/// Web-Mercator world: a view reaching past the antimeridian or the poles
+/// still returns the tiles covering its in-world part, and only a view lying
+/// entirely outside the world returns no tiles (never an error — tiles fail
+/// blank, the drawing stays usable, §9.4). Errors are in Chinese.
 pub fn tiles_for_view(layer: &TileLayer, min: Vec2, max: Vec2, georef: &GeoRef, zoom: Option<u32>) -> Result<Vec<TileRef>, String> {
     if !min.is_finite() || !max.is_finite() || max.x <= min.x || max.y <= min.y {
         return Err("视图范围无效（须为有限矩形，且右上角大于左下角）".into());
     }
-    let (lon0, lat0) = georef.unproject(min).ok_or_else(|| "视图左下角超出投影范围".to_string())?;
-    let (lon1, lat1) = georef.unproject(max).ok_or_else(|| "视图右上角超出投影范围".to_string())?;
+    let corners = [
+        view_corner_lonlat(georef, min),
+        view_corner_lonlat(georef, Vec2::new(min.x, max.y)),
+        view_corner_lonlat(georef, Vec2::new(max.x, min.y)),
+        view_corner_lonlat(georef, max),
+    ];
+    let (mut lon_min, mut lon_max, mut lat_min, mut lat_max) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for (lon, lat) in corners {
+        lon_min = lon_min.min(lon);
+        lon_max = lon_max.max(lon);
+        lat_min = lat_min.min(lat);
+        lat_max = lat_max.max(lat);
+    }
+    // Clamp to the Web-Mercator world (tiles exist nowhere else).
+    lon_min = lon_min.clamp(-180.0, 180.0);
+    lon_max = lon_max.clamp(-180.0, 180.0);
+    lat_min = lat_min.clamp(-MERCATOR_MAX_LAT, MERCATOR_MAX_LAT);
+    lat_max = lat_max.clamp(-MERCATOR_MAX_LAT, MERCATOR_MAX_LAT);
     // A GCJ-02 source's tiles are indexed in GCJ-02: convert the view
     // bounds (WGS-84) to the source frame before tile lookup (display-only).
-    let (lon0, lat0, lon1, lat1) = if layer.coord_type == CoordType::Gcj02 {
-        let (a_lat, a_lon) = wgs84_to_gcj02(lat0, lon0);
-        let (b_lat, b_lon) = wgs84_to_gcj02(lat1, lon1);
-        (a_lon, a_lat, b_lon, b_lat)
-    } else {
-        (lon0, lat0, lon1, lat1)
-    };
-    let (lon_min, lon_max) = (lon0.min(lon1), lon0.max(lon1));
-    let (lat_min, lat_max) = (lat0.min(lat1), lat0.max(lat1));
+    if layer.coord_type == CoordType::Gcj02 {
+        let (a_lat, a_lon) = wgs84_to_gcj02(lat_min, lon_min);
+        let (b_lat, b_lon) = wgs84_to_gcj02(lat_max, lon_max);
+        lon_min = a_lon.min(b_lon);
+        lon_max = a_lon.max(b_lon);
+        lat_min = a_lat.min(b_lat);
+        lat_max = a_lat.max(b_lat);
+        lon_min = lon_min.clamp(-180.0, 180.0);
+        lon_max = lon_max.clamp(-180.0, 180.0);
+        lat_min = lat_min.clamp(-MERCATOR_MAX_LAT, MERCATOR_MAX_LAT);
+        lat_max = lat_max.clamp(-MERCATOR_MAX_LAT, MERCATOR_MAX_LAT);
+    }
+    // The max edges are nudged a hair inside the world: at exactly
+    // lon = 180 (or lat = −85.051…) the tile index would be 2^z, out of
+    // range, and at exactly lat = +85.05112878 (a truncated constant) the
+    // Mercator y rounds a hair negative — each would empty the whole view.
+    lon_max = lon_max.min(180.0 - 1e-7);
+    lat_min = lat_min.max(-MERCATOR_MAX_LAT + 1e-7);
+    lat_max = lat_max.min(MERCATOR_MAX_LAT - 1e-7);
+    if lon_min >= lon_max || lat_min >= lat_max {
+        // The view lies entirely outside the mapped world: no tiles,
+        // which the callers already draw as blank (§9.4).
+        return Ok(Vec::new());
+    }
     let count_at = |z: u32| -> Option<usize> {
         let (x0, y0) = lonlat_to_tile(lon_min, lat_max, z)?;
         let (x1, y1) = lonlat_to_tile(lon_max, lat_min, z)?;
@@ -480,8 +530,11 @@ pub fn tiles_for_view(layer: &TileLayer, min: Vec2, max: Vec2, georef: &GeoRef, 
         Some(z) => z.min(layer.max_zoom),
         None => (0..=layer.max_zoom).rev().find(|&z| count_at(z).is_some_and(|c| c <= MAX_TILES)).unwrap_or(0),
     };
-    let (x0, y0) = lonlat_to_tile(lon_min, lat_max, z).ok_or_else(|| "视图超出瓦片范围".to_string())?;
-    let (x1, y1) = lonlat_to_tile(lon_max, lat_min, z).ok_or_else(|| "视图超出瓦片范围".to_string())?;
+    // The clamped+nudged window always lands in the world, but keep the
+    // defensive shape: no tiles instead of an error, per §9.4.
+    let (Some((x0, y0)), Some((x1, y1))) = (lonlat_to_tile(lon_min, lat_max, z), lonlat_to_tile(lon_max, lat_min, z)) else {
+        return Ok(Vec::new());
+    };
     let mut out = Vec::new();
     let mut x = x0;
     while x <= x1 {
@@ -1469,6 +1522,88 @@ mod tests {
 
     fn georef() -> GeoRef {
         GeoRef::centred(32.1301, 114.0814)
+    }
+
+    /// The union of placement corners (the area the canvas will paint).
+    fn placements_union(ps: &[TilePlacement]) -> (Vec2, Vec2) {
+        let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+        for p in ps {
+            for c in p.corners {
+                lo = Vec2::new(lo.x.min(c.x), lo.y.min(c.y));
+                hi = Vec2::new(hi.x.max(c.x), hi.y.max(c.y));
+            }
+        }
+        (lo, hi)
+    }
+
+    #[test]
+    fn tiles_cover_the_view_at_every_zoom_scale() {
+        // Regression: zooming in and out across the usual CAD range must
+        // always produce tiles covering the whole view (auto-zoom picks a
+        // fitting z, placements span the view), never an error or a patch.
+        let layer = TileLayer::default_osm();
+        let g = georef();
+        for half in [5.0f64, 50.0, 500.0, 5_000.0, 50_000.0, 500_000.0, 2_500_000.0] {
+            let (min, max) = (Vec2::new(-half, -half), Vec2::new(half, half));
+            let ps = tile_placements(&layer, min, max, &g, None).unwrap_or_default();
+            assert!(!ps.is_empty(), "half={half}: a view must always get tiles");
+            assert!(ps.iter().all(|p| p.tile.z <= layer.max_zoom), "half={half}: never above the layer cap");
+            let (lo, hi) = placements_union(&ps);
+            // Tiles overshoot the view by less than one tile on each side;
+            // a 1 m slack covers the TM quad's sub-metre non-rectangularity.
+            assert!(
+                lo.x <= min.x + 1.0 && lo.y <= min.y + 1.0 && hi.x >= max.x - 1.0 && hi.y >= max.y - 1.0,
+                "half={half}: tiles must cover the view, union {lo:?}..{hi:?}"
+            );
+        }
+        // Zoomed all the way in, the finest level is used; zoomed far out,
+        // a coarse level — the auto choice tracks the view, by count.
+        let near = tiles_for_view(&layer, Vec2::new(-50.0, -50.0), Vec2::new(50.0, 50.0), &g, None).unwrap_or_default();
+        assert!(near.iter().all(|t| t.z == 19), "a 100 m view is served at the cap z=19, got {:?}", near.first().map(|t| t.z));
+        let far = tiles_for_view(&layer, Vec2::new(-500_000.0, -500_000.0), Vec2::new(500_000.0, 500_000.0), &g, None).unwrap_or_default();
+        assert!(far.iter().all(|t| t.z <= 10), "a 1000 km view drops to a coarse z, got {:?}", far.first().map(|t| t.z));
+    }
+
+    #[test]
+    fn tiles_survive_views_past_the_edge_of_the_world() {
+        // Regression: zooming out (or panning) until a view corner leaves
+        // the projected world used to error `tiles_for_view` out wholesale,
+        // and the canvas drew nothing at all — the map vanished. The window
+        // is now clamped to the world and the in-world part still tiles.
+        let layer = TileLayer::default_osm();
+        let g = georef();
+        for half in [10_000_000.0f64, 30_000_000.0, 100_000_000.0] {
+            let (min, max) = (Vec2::new(-half, -half), Vec2::new(half, half));
+            let tiles = tiles_for_view(&layer, min, max, &g, None);
+            assert!(tiles.is_ok(), "half={half}: a past-the-world view must not error");
+            let tiles = tiles.unwrap_or_default();
+            assert!(!tiles.is_empty(), "half={half}: the in-world part must still tile");
+            assert!(tiles.iter().all(|t| t.z <= 5), "half={half}: a planet-scale view is served coarse, got {:?}", tiles.first().map(|t| t.z));
+        }
+        // A 20 000 km view reaches the antimeridian: the union of its tile
+        // corners extends to the world's east edge (≈9.85M m at the equator
+        // for this georef) and still covers the west side of the view.
+        let ps =
+            tile_placements(&layer, Vec2::new(-10_000_000.0, -10_000_000.0), Vec2::new(10_000_000.0, 10_000_000.0), &g, None).unwrap_or_default();
+        let (lo, hi) = placements_union(&ps);
+        assert!(lo.x <= -9_000_000.0, "west side covered, union {lo:?}..{hi:?}");
+        assert!(hi.x >= 9_000_000.0, "east side reaches the antimeridian, union {lo:?}..{hi:?}");
+        // Panned far east first, then zoomed out: same clamp, same tiles.
+        let off = tile_placements(&layer, Vec2::new(-1_000_000.0, -6_000_000.0), Vec2::new(11_000_000.0, 6_000_000.0), &g, None).unwrap_or_default();
+        assert!(!off.is_empty(), "an off-centre past-the-world view must tile");
+        // A view lying entirely off the world (past the antimeridian) gets
+        // no tiles — and still no error (blank is the §9.4 failure shape).
+        let gone = tiles_for_view(&layer, Vec2::new(29_000_000.0, -1_000_000.0), Vec2::new(31_000_000.0, 1_000_000.0), &g, None).unwrap_or_default();
+        assert!(gone.is_empty(), "a view past the world edge has no tiles");
+        // A GCJ-02 layer clamps the same way (its window is converted after
+        // clamping, then clamped again).
+        let mut gcj = TileLayer::default_osm();
+        gcj.url_template = "https://example.com/{z}/{x}/{y}.png".into();
+        gcj.attribution = "Example 贡献者".into();
+        gcj.coord_type = CoordType::Gcj02;
+        let tiles =
+            tiles_for_view(&gcj, Vec2::new(-10_000_000.0, -10_000_000.0), Vec2::new(10_000_000.0, 10_000_000.0), &g, None).unwrap_or_default();
+        assert!(!tiles.is_empty(), "a GCJ-02 layer must tile a past-the-world view too");
     }
 
     #[test]
