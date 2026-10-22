@@ -72,7 +72,10 @@ pub fn specs() -> Vec<CommandSpec> {
             .alias(&["mld"])
             .params("{points: [[arrow], ..., [landing]] ([location] with leaderType none), text?, leaderType?: straight|spline|none, block?: name, blockAttach?: center|insertion}")
             .interactive(|s| Ok(Box::new(MLeaderM::new(s)))),
-        CommandSpec::new("leader", "Leader", run_leader).alias(&["lead"]).params("{points: [[x,y]...], text?}"),
+        CommandSpec::new("leader", "Leader", run_leader)
+            .alias(&["lead"])
+            .params("{points: [[x,y]...], text?}")
+            .interactive(|_| Ok(Box::<LeaderM>::default())),
         CommandSpec::new("dimstyle.update", "Update", run_update)
             .menu(&["Dimension", "Update"])
             .params("{handles?}")
@@ -91,16 +94,26 @@ pub fn specs() -> Vec<CommandSpec> {
             .alias(&["dda"])
             .params("{handles?}")
             .interactive(|_| Ok(Box::new(SelectRun::new("dimdisassociate", "DIMDISASSOCIATE")))),
-        CommandSpec::new("dimtedit.home", "Home", |s, p| run_tedit(s, p, "home")).menu(&["Dimension", "Align Text", "Home"]).params("{handles?}"),
+        CommandSpec::new("dimtedit.home", "Home", |s, p| run_tedit(s, p, "home"))
+            .menu(&["Dimension", "Align Text", "Home"])
+            .params("{handles?}")
+            .interactive(|_| Ok(Box::new(SelectRun::single("dimtedit.home", "DIMTEDIT", "Select dimension")))),
         CommandSpec::new("dimtedit.angle", "Angle", |s, p| run_tedit(s, p, "angle"))
             .menu(&["Dimension", "Align Text", "Angle"])
             .params("{handles?, angle: degrees}")
             .interactive(|_| Ok(Box::new(tedit::TEditM::angle()))),
-        CommandSpec::new("dimtedit.left", "Left", |s, p| run_tedit(s, p, "left")).menu(&["Dimension", "Align Text", "Left"]).params("{handles?}"),
+        CommandSpec::new("dimtedit.left", "Left", |s, p| run_tedit(s, p, "left"))
+            .menu(&["Dimension", "Align Text", "Left"])
+            .params("{handles?}")
+            .interactive(|_| Ok(Box::new(SelectRun::single("dimtedit.left", "DIMTEDIT", "Select dimension")))),
         CommandSpec::new("dimtedit.center", "Center", |s, p| run_tedit(s, p, "center"))
             .menu(&["Dimension", "Align Text", "Center"])
-            .params("{handles?}"),
-        CommandSpec::new("dimtedit.right", "Right", |s, p| run_tedit(s, p, "right")).menu(&["Dimension", "Align Text", "Right"]).params("{handles?}"),
+            .params("{handles?}")
+            .interactive(|_| Ok(Box::new(SelectRun::single("dimtedit.center", "DIMTEDIT", "Select dimension")))),
+        CommandSpec::new("dimtedit.right", "Right", |s, p| run_tedit(s, p, "right"))
+            .menu(&["Dimension", "Align Text", "Right"])
+            .params("{handles?}")
+            .interactive(|_| Ok(Box::new(SelectRun::single("dimtedit.right", "DIMTEDIT", "Select dimension")))),
         CommandSpec::new("dimtedit", "Dimension Text Edit", run_dimtedit)
             .alias(&["dimted"])
             .params("{handles?, at?: [x,y], mode?: home|angle|left|center|right, angle?}")
@@ -503,6 +516,76 @@ fn run_leader(s: &mut Session, p: &Value) -> Result<Value> {
         );
     }
     Ok(json!({ "handles": out }))
+}
+
+/// LEADER typed (audit F-class): pick the leader points, Enter, then one line of
+/// annotation text (blank = no text). AutoCAD's full LEADER continues into format
+/// options; the text line covers the common path.
+#[derive(Default)]
+pub struct LeaderM {
+    pts: Vec<Vec2>,
+    text_phase: bool,
+}
+
+impl Interactive for LeaderM {
+    fn name(&self) -> &'static str {
+        "LEADER"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.text_phase {
+            Prompt::new("Enter text (blank for none)", Accept::TEXT)
+        } else if self.pts.is_empty() {
+            Prompt::new("Specify leader start point", Accept::POINT)
+        } else {
+            Prompt::new("Specify next point", Accept::POINT).base_opt(self.pts.last().copied())
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Point(p) if !self.text_phase => {
+                self.pts.push(p);
+                Ok(Step::Continue)
+            }
+            Input::Enter if !self.text_phase => {
+                if self.pts.len() >= 2 {
+                    self.text_phase = true;
+                    Ok(Step::Continue)
+                } else {
+                    s.echo("Leader needs at least two points.");
+                    Ok(Step::Continue)
+                }
+            }
+            Input::Text(t) if self.text_phase => {
+                let points: Vec<Value> = self.pts.iter().map(|p| json!([p.x, p.y])).collect();
+                let mut p = json!({ "points": points });
+                let t = t.trim();
+                if !t.is_empty() {
+                    p["text"] = json!(t);
+                }
+                run_leader(s, &p)?;
+                Ok(Step::Done)
+            }
+            Input::Enter if self.text_phase => {
+                let points: Vec<Value> = self.pts.iter().map(|p| json!([p.x, p.y])).collect();
+                run_leader(s, &json!({ "points": points }))?;
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+    fn preview(&self, _s: &Session, _cursor: Vec2) -> Vec<EntityKind> {
+        if self.pts.len() >= 2 && !self.text_phase {
+            vec![EntityKind::Leader(cadcraft_doc::Leader {
+                vertices: self.pts.iter().map(|q| v3(*q)).collect(),
+                arrow: true,
+                spline: false,
+                style: "Standard".into(),
+            })]
+        } else {
+            Vec::new()
+        }
+    }
 }
 
 fn run_update(s: &mut Session, p: &Value) -> Result<Value> {

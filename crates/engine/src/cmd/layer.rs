@@ -6,9 +6,9 @@ use cadcraft_color::Color;
 use cadcraft_doc::{Layer, Lineweight};
 use serde_json::{Value, json};
 
-use super::machines::SelectRun;
+use super::machines::{SelOutcome, SelectPhase, SelectRun};
 use super::*;
-use crate::{Result, Session};
+use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -26,7 +26,10 @@ pub fn specs() -> Vec<CommandSpec> {
             .params("{name}"),
         CommandSpec::new("layer.delete", "Delete Layer", run_delete).params("{name}"),
         CommandSpec::new("laymcur", "Make Object's Layer Current", run_laymcur).params("{handles?}"),
-        CommandSpec::new("laymch", "Layer Match", run_laymch).menu(&["Format", "Layer Tools", "Layer Match"]).params("{handles?, layer}"),
+        CommandSpec::new("laymch", "Layer Match", run_laymch)
+            .menu(&["Format", "Layer Tools", "Layer Match"])
+            .params("{handles?, layer}")
+            .interactive(|_| Ok(Box::<LaymchM>::default())),
         CommandSpec::new("laycur", "Change to Current Layer", run_laycur)
             .menu(&["Format", "Layer Tools", "Change to Current Layer"])
             .params("{handles?}")
@@ -327,6 +330,92 @@ fn run_laymch(s: &mut Session, p: &Value) -> Result<Value> {
         d.modify_entity(*h, |e| e.common.layer = layer.clone())?;
     }
     Ok(json!({ "changed": hs.len() }))
+}
+
+/// LAYMCH typed (audit F-class): select the objects to change, then pick an object
+/// on the destination layer, or [Name] and type an existing layer's name.
+#[derive(Default)]
+pub struct LaymchM {
+    sel: SelectPhase,
+    begun: bool,
+    handles: Option<Vec<cadcraft_doc::Handle>>,
+    name_mode: bool,
+}
+
+impl Interactive for LaymchM {
+    fn name(&self) -> &'static str {
+        "LAYMCH"
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        if self.handles.is_none() {
+            self.sel.prompt()
+        } else if self.name_mode {
+            Prompt::new("Enter layer name", Accept::TEXT)
+        } else {
+            Prompt::new("Select object on the destination layer", Accept::SELECT).kw(&["Name"])
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        if self.handles.is_none() {
+            if !self.begun {
+                self.begun = true;
+                let b = SelectPhase::begin(s);
+                if b.done {
+                    self.handles = Some(b.picked.clone());
+                    self.sel = b;
+                    return Ok(Step::Continue);
+                }
+                self.sel = b;
+            }
+            return match self.sel.feed(s, &i)? {
+                SelOutcome::More => Ok(Step::Continue),
+                SelOutcome::Empty => Ok(Step::Done),
+                SelOutcome::Done(hs) => {
+                    self.handles = Some(hs);
+                    Ok(Step::Continue)
+                }
+            };
+        }
+        let hs = self.handles.clone().unwrap_or_default();
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Keyword(k) if k == "Name" && !self.name_mode => {
+                self.name_mode = true;
+                Ok(Step::Continue)
+            }
+            Input::Pick(picked) if !self.name_mode => {
+                let Some(h) = picked.first() else { return Ok(Step::Continue) };
+                let Some(layer) = s.doc()?.entity(*h).map(|e| e.common.layer.clone()) else {
+                    s.echo("That object is not in the drawing.");
+                    return Ok(Step::Continue);
+                };
+                self.apply(s, &hs, &layer)
+            }
+            Input::Text(t) if self.name_mode => {
+                let t = t.trim().to_string();
+                if t.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                let exists = s.doc()?.layers.iter().any(|l| l.name.eq_ignore_ascii_case(&t));
+                if !exists {
+                    s.echo(format!("Layer \"{t}\" does not exist."));
+                    return Ok(Step::Continue);
+                }
+                self.apply(s, &hs, &t)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
+}
+
+impl LaymchM {
+    fn apply(&self, s: &mut Session, hs: &[cadcraft_doc::Handle], layer: &str) -> Result<Step> {
+        let handles: Vec<String> = hs.iter().map(|h| h.hex()).collect();
+        let r = run_laymch(s, &json!({ "handles": handles, "layer": layer }))?;
+        let n = r.get("changed").and_then(Value::as_u64).unwrap_or(0);
+        s.echo(format!("{n} object(s) changed to layer {layer}."));
+        Ok(Step::Done)
+    }
 }
 
 fn run_laycur(s: &mut Session, p: &Value) -> Result<Value> {
