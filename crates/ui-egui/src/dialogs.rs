@@ -10,6 +10,7 @@ use crate::theme::Tokens;
 
 pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     crate::mtext_editor::show(app, ctx);
+    crate::text_editor::show(app, ctx);
     crate::quick::quick_properties(app, ctx);
     // A LISP DCL dialog is not an `app.ui.dialog`: it shows while a routine waits on
     // `start_dialog`, whatever else is (or isn't) open.

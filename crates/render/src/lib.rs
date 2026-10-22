@@ -1263,7 +1263,26 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
             }
         }
         kind => {
+            // An OLE2FRAME with an EMF preview draws the preview as vector geometry
+            // in its frame; when it drew anything, the placeholder label is skipped
+            // and the frame's placeholder diagonals are not emitted (the border
+            // stays): in AutoCAD the X belongs to the no-preview placeholder only,
+            // never across rendered content.
+            let mut ole_drew = false;
+            let ole_corners = match kind {
+                EntityKind::Unknown(u) => u.ole.as_ref().filter(|o| o.is_visible()).map(|o| {
+                    ole_drew = crate::emf::draw_ole_emf(b, ctx, &u.tags, o);
+                    o.corners()
+                }),
+                _ => None,
+            };
             for prim in kind.prims() {
+                if ole_drew
+                    && let Some(c) = &ole_corners
+                    && is_frame_diagonal(&prim, c)
+                {
+                    continue;
+                }
                 match prim {
                     Prim::Seg(s) => {
                         let mut pts = Vec::new();
@@ -1288,14 +1307,6 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                         b.tris(ctx, rgb, &tris);
                     }
                 }
-            }
-            // An OLE2FRAME with an EMF preview draws the preview as vector geometry
-            // over the frame; when it drew anything, the placeholder label is skipped.
-            let mut ole_drew = false;
-            if let EntityKind::Unknown(u) = kind
-                && let Some(o) = u.ole.as_ref().filter(|o| o.is_visible())
-            {
-                ole_drew = crate::emf::draw_ole_emf(b, ctx, &u.tags, o);
             }
             // An OLE2FRAME's placeholder gets a centred label inside its frame (its prims
             // above already drew the rectangle + diagonals). The label scales with the frame
@@ -1335,6 +1346,15 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
     }
 }
 
+/// Whether `prim` is one of an OLE frame's two placeholder diagonals (corner to
+/// opposite corner of `corners`): the border segments join adjacent corners.
+fn is_frame_diagonal(prim: &Prim, corners: &[Vec2; 4]) -> bool {
+    let Prim::Seg(s) = prim else { return false };
+    let (a, b) = (s.start(), s.end());
+    let ends = |x: Vec2, y: Vec2| (a == x && b == y) || (a == y && b == x);
+    ends(corners[0], corners[2]) || ends(corners[1], corners[3])
+}
+
 /// The text style of an entity (Standard defaults when missing).
 fn text_style(d: &Drawing, name: &str) -> cadcraft_doc::TextStyle {
     d.text_style(name).cloned().unwrap_or_default()
@@ -1343,7 +1363,7 @@ fn text_style(d: &Drawing, name: &str) -> cadcraft_doc::TextStyle {
 /// Shape a TEXT / ATTRIB / ATTDEF with its style's font and generation flags.
 pub fn place_text_entity(d: &Drawing, t: &cadcraft_doc::Text, value: &str) -> (cadcraft_fonts::Shaped, Bounds2) {
     let ts = text_style(d, &t.style);
-    let font = cadcraft_fonts::TextFont::resolve(&ts.font);
+    let font = cadcraft_fonts::TextFont::resolve_styled(&ts.font, &ts.big_font);
     let (h, v) = align(t.halign, t.valign);
     let p = cadcraft_fonts::TextParams {
         insert: t.insert.xy(),
@@ -1371,7 +1391,7 @@ pub fn layout_mtext_entity(d: &Drawing, t: &cadcraft_doc::MText) -> cadcraft_fon
         rotation: t.rotation,
         line_spacing: t.line_spacing,
         line_spacing_exact: t.line_spacing_exact,
-        font: cadcraft_fonts::TextFont::resolve(&ts.font),
+        font: cadcraft_fonts::TextFont::resolve_styled(&ts.font, &ts.big_font),
         width_factor: ts.width_factor,
         oblique: ts.oblique,
         columns: t.columns.as_ref().map(|c| cadcraft_fonts::MTextColumnSpec {
@@ -1408,7 +1428,12 @@ fn mtext(b: &mut Builder, ctx: &Ctx, t: &cadcraft_doc::MText, rgb: Ink, lw: f32)
 /// The font settings of a dimension style's text style.
 pub fn dim_text(d: &Drawing, st: &cadcraft_doc::DimStyle) -> DimText {
     let ts = text_style(d, &st.text_style);
-    DimText { font: cadcraft_fonts::TextFont::resolve(&ts.font), fixed_height: ts.height, width_factor: ts.width_factor, oblique: ts.oblique }
+    DimText {
+        font: cadcraft_fonts::TextFont::resolve_styled(&ts.font, &ts.big_font),
+        fixed_height: ts.height,
+        width_factor: ts.width_factor,
+        oblique: ts.oblique,
+    }
 }
 
 /// Geometry of a dimension in a drawing: its style, overrides and text font.
