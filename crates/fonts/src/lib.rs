@@ -440,6 +440,17 @@ pub fn shape_line(font: &TextFont, s: &str, height: f64, width_factor: f64, obli
     shape_stroke(s, height, width_factor, oblique)
 }
 
+/// Convert a GDI-style **em** height (a LOGFONT `|lfHeight|`: the size at which a
+/// full-width glyph advances one em) into the **cap** height this crate shapes text
+/// at, for `font`. The stroke face draws its glyphs to the height given, so it
+/// passes through unchanged; an outline face scales by its cap/em ratio.
+pub fn em_to_cap(font: &TextFont, em: f64) -> f64 {
+    match font {
+        TextFont::Outline(face) => em * ttf::cap_ratio(face).unwrap_or(1.0),
+        TextFont::Stroke => em,
+    }
+}
+
 /// Width of one line in `font`.
 pub fn text_width(font: &TextFont, s: &str, height: f64, width_factor: f64) -> f64 {
     if let TextFont::Outline(face) = font
@@ -589,6 +600,23 @@ pub fn place_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn em_to_cap_scales_outline_faces_and_passes_the_stroke_face_through() {
+        // The stroke face draws to the height given: no conversion.
+        assert_eq!(em_to_cap(&TextFont::Stroke, 195.0), 195.0);
+        // An outline face converts by its cap/em ratio (the Song family sits
+        // near 0.65): an em height must come out strictly smaller, or EMF text
+        // shaped with it overflows its Dx advances (the OLE-table overlap bug).
+        let song = TextFont::resolve("宋体");
+        if let TextFont::Outline(face) = &song {
+            let ratio = ttf::cap_ratio(face).expect("a parsed face has a cap ratio");
+            assert!((0.4..1.0).contains(&ratio), "cap ratio {ratio}");
+            let cap = em_to_cap(&song, 195.0);
+            assert!((cap - 195.0 * ratio).abs() < 1e-9);
+            assert!(cap < 195.0, "an em height must shrink to the cap height, got {cap}");
+        }
+    }
 
     #[test]
     fn every_ascii_printable_has_a_glyph() {

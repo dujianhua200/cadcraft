@@ -54,6 +54,19 @@ interactive prompts, counted from source 2026-10-10), plus about 30 UI-only comm
 `crates/ui-egui/src/menus.rs`. The command line, menus, toolbar, Tool Sets, scripts, CLI, control
 channel and MCP all reach the same commands. JSON calls never open dialogs.
 
+**TRIM / EXTEND.** The interactive flow follows AutoCAD's current quick trim: TRIMEXTENDMODE
+defaults to Quick (1), where every object is a cutting edge — starting TR and picking a segment
+trims it to the nearest intersections, an object no edge crosses is erased, and no cutting-edge
+selection is ever forced. Standard mode (0) first asks for cutting/boundary edges (Enter there
+selects all). Fence trims everything the fence path crosses, Crossing everything a window
+touches, and holding Shift while picking flips the pick to the opposite operation (trim ↔
+extend): the UI reports it as `Input::PointShift`, which only TRIM/EXTEND interpret — every
+other command receives it as an ordinary point. Esc cancels (the generic input layer turns it
+into `Step::Cancel`). Remaining differences from AutoCAD, kept deliberately: no freehand
+drag-to-trim path (a drag makes a window instead), Project is recorded but geometrically a
+no-op (drawings are 2D), and the JSON form keeps Standard semantics unless `"mode": "quick"`
+is passed (a programmatic trim that meets no edge is an error, never a silent erase).
+
 ## Rendering
 
 `render::build` turns a space into a display list once per change; the UI uploads it to wgpu in
@@ -87,7 +100,13 @@ pipeline (`crates/fonts`), shared by canvas text, dimensions, plots and OLE prev
 **OLE EMF text.** An OLE2FRAME preview's `EXTTEXTOUT` records resolve their LOGFONT face
 through the same pipeline (Excel's 宋体 / 等线 names land on the unified Song family, so
 preview text is filled, never stroke outlines). Per-character Dx advances are honoured:
-each glyph is placed at its cumulative Dx offset with the resolved face. The preview maps
+each glyph is placed at its cumulative Dx offset with the resolved face. One unit
+conversion is load-bearing: a LOGFONT height is an **em** height (a full-width glyph's Dx
+advance equals |lfHeight|), while this crate shapes text at **cap** height — so EMF text
+is shaped at `|lfHeight| × cap/em` of the resolved face (`cadcraft_fonts::em_to_cap`).
+Shaping at the raw lfHeight inflates every glyph by 1/(cap ratio) (≈1.5× for the Song
+family) over its Dx advance and over the row pitch, which is exactly the overlapped mush
+users reported in OLE tables. The preview maps
 onto its frame by its ink bounds when the metafile header bounds carry empty margins, so
 content fills the frame it belongs to; and when a preview draws, the frame's placeholder
 diagonals are not emitted (the border stays) — the X belongs to the no-preview placeholder.

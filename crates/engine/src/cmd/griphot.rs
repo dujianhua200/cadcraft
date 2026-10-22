@@ -271,7 +271,8 @@ impl GripEdit {
                 s.echo(self.label());
                 Ok(Step::Continue)
             }
-            Input::Point(p) => {
+            // A shift-pick is an ordinary point here (the flip only means something to TRIM/EXTEND).
+            Input::Point(p) | Input::PointShift(p) => {
                 let m = self.matrix(p);
                 self.edit(s, p, m)
             }

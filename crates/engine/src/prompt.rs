@@ -176,6 +176,10 @@ impl Prompt {
 #[serde(tag = "kind", content = "value", rename_all = "camelCase")]
 pub enum Input {
     Point(Vec2),
+    /// A point picked with Shift held. Only commands whose prompt advertises a
+    /// shift-flipped pick (TRIM / EXTEND: shift-select to extend / trim) interpret
+    /// it; the input layer treats it as a point everywhere else.
+    PointShift(Vec2),
     /// A deferred tangent/perpendicular snap, only sent to prompts that accept it
     /// (`Prompt.deferred`).
     Deferred(crate::snap::Deferred),

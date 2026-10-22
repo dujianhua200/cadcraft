@@ -175,6 +175,8 @@ fn run(s: &mut Session, p: &Value, extending: bool) -> Result<Value> {
         p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex)).collect());
     let edges = Edges { only: only.as_deref(), implied: edge_mode_param(cmd, p)? };
     let quick = match p.get("mode") {
+        // No explicit mode: Standard semantics for the JSON form (a trim that meets
+        // no edge is an error, never a silent erase); Quick is opt-in via "quick".
         None | Some(Value::Null) => false,
         Some(v) => match v.as_str().map(|m| m.trim().to_ascii_lowercase()).as_deref() {
             Some("quick") => true,
@@ -258,6 +260,22 @@ impl TrimM {
             self.undo.push(before);
         }
         r
+    }
+    /// One pick at the "Select object to trim/extend" prompt: trim (or extend, when
+    /// `extending`) the object under `p` to the current edges; a pick in empty space
+    /// opens a crossing window there.
+    fn pick_at(&mut self, s: &mut Session, p: Vec2, extending: bool, quick: bool, implied: bool) -> Result<Step> {
+        let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
+        let space = s.space();
+        let Some(h) = crate::select::pick(s.doc()?, &space, p, ap) else {
+            self.stage = Stage::Crossing(Some(p));
+            return Ok(Step::Continue);
+        };
+        let r = self.step(s, |m, s| apply(s, h, p, extending, m.edges(quick, implied), quick).map(|_| ()));
+        if let Err(e) = r {
+            s.echo(e.to_string());
+        }
+        Ok(Step::Continue)
     }
     fn option(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         let word = match &i {
@@ -471,20 +489,10 @@ impl Interactive for TrimM {
                 Ok(Step::Continue)
             }
             Stage::Pick => match i {
-                Input::Point(p) => {
-                    let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
-                    let space = s.space();
-                    let Some(h) = crate::select::pick(s.doc()?, &space, p, ap) else {
-                        // A pick in empty space opens a crossing window there.
-                        self.stage = Stage::Crossing(Some(p));
-                        return Ok(Step::Continue);
-                    };
-                    let r = self.step(s, |m, s| apply(s, h, p, extending, m.edges(quick, implied), quick).map(|_| ()));
-                    if let Err(e) = r {
-                        s.echo(e.to_string());
-                    }
-                    Ok(Step::Continue)
-                }
+                Input::Point(p) => self.pick_at(s, p, extending, quick, implied),
+                // Shift held: the opposite operation for this one pick (TRIM extends,
+                // EXTEND trims), as the prompt advertises.
+                Input::PointShift(p) => self.pick_at(s, p, !extending, quick, implied),
                 Input::Enter => Ok(Step::Done),
                 Input::Keyword(k) => {
                     match k.as_str() {

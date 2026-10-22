@@ -1428,11 +1428,16 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         });
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
+            let shift = ui.input(|i| i.modifiers.shift);
             for pos in earlier.iter().filter(|p| rect.contains(**p)) {
                 let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
-                let result = match app.canvas.snap {
-                    Some(hit) => app.session.input_snapped(hit),
-                    None => app.session.input(Input::Point(w)),
+                let result = if shift {
+                    app.session.input(Input::PointShift(w))
+                } else {
+                    match app.canvas.snap {
+                        Some(hit) => app.session.input_snapped(hit),
+                        None => app.session.input(Input::Point(w)),
+                    }
                 };
                 if let Err(e) = result {
                     app.session.echo(e.to_string());
@@ -1518,9 +1523,15 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 app.cmd.buffer.clear();
             }
             // Preserve a snap's viewport origin for DIST, and its deferred curve where needed.
-            let result = match app.canvas.snap {
-                Some(hit) => app.session.input_snapped(hit),
-                None => app.session.input(Input::Point(p)),
+            // Shift held flips the pick for commands that advertise it (TRIM/EXTEND);
+            // the point itself is the snap-adjusted cursor either way.
+            let result = if mods.shift {
+                app.session.input(Input::PointShift(p))
+            } else {
+                match app.canvas.snap {
+                    Some(hit) => app.session.input_snapped(hit),
+                    None => app.session.input(Input::Point(p)),
+                }
             };
             if let Err(e) = result {
                 app.session.echo(e.to_string());

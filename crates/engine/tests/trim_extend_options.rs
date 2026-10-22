@@ -201,3 +201,47 @@ fn json_forms_take_fence_crossing_edge_mode_and_mode() {
     assert_eq!(r["extended"], 1);
     assert_eq!(lines(&s), vec![((0.0, 0.0), (10.0, 0.0)), ((10.0, -5.0), (10.0, 5.0))]);
 }
+
+#[test]
+fn shift_pick_extends_during_trim() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    // A boundary line at x = 10 and a short line at y = 3 that nothing crosses:
+    // a plain pick would erase it (Quick mode), a shift-pick extends it instead.
+    let mut s = session(&["10,-5 10,5", "2,3 6,3"]);
+    s.cmdline("TRIM").unwrap();
+    assert!(s.running.is_some());
+    s.input(Input::PointShift(Vec2::new(6.0, 3.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), vec![((2.0, 3.0), (10.0, 3.0)), ((10.0, -5.0), (10.0, 5.0))]);
+}
+
+#[test]
+fn shift_pick_trims_during_extend() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    let mut s = ladder();
+    s.cmdline("EXTEND").unwrap();
+    // Shift-pick the y = 0 line between the two edges: the picked piece trims away.
+    s.input(Input::PointShift(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (15.0, 2.0)), ((10.0, 0.0), (15.0, 0.0))]));
+}
+
+#[test]
+fn shift_pick_at_a_selection_prompt_is_an_ordinary_pick() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    let mut s = ladder();
+    s.cmdline("TRIM").unwrap();
+    s.input(Input::Keyword("cuTting edges".into())).unwrap();
+    // Shift held while choosing the cutting edge: still just picks it (x = 0 only).
+    s.input(Input::PointShift(Vec2::new(0.0, 4.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (15.0, 2.0))]));
+}
