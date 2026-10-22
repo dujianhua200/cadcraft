@@ -433,18 +433,90 @@ struct DistM {
     /// Multiple points: the points so far, the first included.
     multi: Option<Vec<Vec2>>,
     sources: Vec<Option<crate::snap::ViewportPoint>>,
+    /// Bulge of each completed segment of the multiple-points path.
+    bulges: Vec<f64>,
+    /// Arc option in progress: 1 = waiting for the point on the arc, 2 = for its end.
+    arc: u8,
+    arc_on: Option<Vec2>,
     /// Asking for the length of a segment (the Length option).
     length: bool,
 }
 
-/// Total length of the segments through `pts`.
-fn path_len(pts: &[Vec2]) -> f64 {
+/// Bulge of the circular arc from `a` to `b` passing through `m`, in the DXF
+/// convention (tan(sweep/4); positive sweeps counter-clockwise). The bulge is
+/// invariant under uniform scale, rotation and translation, so it can be computed
+/// in paper space and applied to model points. `None` when the three points are
+/// (near-)collinear: a straight segment.
+fn arc_bulge(a: Vec2, m: Vec2, b: Vec2) -> Option<f64> {
+    let d = 2.0 * (a.x * (m.y - b.y) + m.x * (b.y - a.y) + b.x * (a.y - m.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let (a2, m2, b2) = (a.x * a.x + a.y * a.y, m.x * m.x + m.y * m.y, b.x * b.x + b.y * b.y);
+    let o = Vec2::new((a2 * (m.y - b.y) + m2 * (b.y - a.y) + b2 * (a.y - m.y)) / d, (a2 * (b.x - m.x) + m2 * (a.x - b.x) + b2 * (m.x - a.x)) / d);
+    let ang = |v: Vec2| v.y.atan2(v.x);
+    let tau = std::f64::consts::TAU;
+    let mut ccw = ang(b - o) - ang(a - o);
+    while ccw <= 0.0 {
+        ccw += tau;
+    }
+    let mut tm = ang(m - o) - ang(a - o);
+    while tm < 0.0 {
+        tm += tau;
+    }
+    // The arc through m sweeps counter-clockwise when m lies on the CCW arc a→b.
+    let sweep = if tm <= ccw { ccw } else { ccw - tau };
+    let b = (sweep / 4.0).tan();
+    b.is_finite().then_some(b)
+}
+
+/// Length of one segment with the given chord length and bulge.
+fn seg_len(chord: f64, bulge: f64) -> f64 {
+    if bulge.abs() < 1e-12 {
+        return chord;
+    }
+    let sweep = 4.0 * bulge.atan();
+    let r = chord * (1.0 + bulge * bulge) / (4.0 * bulge.abs());
+    r * sweep.abs()
+}
+
+/// Signed area between a chord and its arc (the circular segment), positive when
+/// the arc sweeps counter-clockwise like the boundary it belongs to.
+fn seg_area(chord: f64, bulge: f64) -> f64 {
+    if bulge.abs() < 1e-12 {
+        return 0.0;
+    }
+    let sweep = 4.0 * bulge.atan();
+    let r = chord * (1.0 + bulge * bulge) / (4.0 * bulge.abs());
+    0.5 * r * r * (sweep - sweep.sin())
+}
+
+/// Path length where segment i (pts[i] → pts[i+1]) carries `bulges[i]`.
+fn path_len_b(pts: &[Vec2], bulges: &[f64]) -> f64 {
     pts.windows(2)
-        .map(|w| match w {
-            [a, b] => a.dist(*b),
+        .enumerate()
+        .map(|(i, w)| match w {
+            [a, b] => seg_len(a.dist(*b), bulges.get(i).copied().unwrap_or(0.0)),
             _ => 0.0,
         })
         .sum()
+}
+
+/// (area, perimeter) of the closed boundary through `pts` whose open segments
+/// carry bulges (the closing segment is straight). Arc contributions are signed
+/// like the boundary, so an outward arc grows the area on either winding.
+fn area_of_b(pts: &[Vec2], bulges: &[f64]) -> (f64, f64) {
+    let mut area = cadcraft_geom::shoelace(pts);
+    let n = pts.len();
+    let mut per = 0.0;
+    for i in 0..n {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let bulge = if i + 1 < n { bulges.get(i).copied().unwrap_or(0.0) } else { 0.0 };
+        let chord = a.dist(b);
+        area += seg_area(chord, bulge);
+        per += seg_len(chord, bulge);
+    }
+    (area.abs(), per)
 }
 
 /// The point `len` beyond the last of `pts`, continuing the last segment (along X after a single
@@ -488,6 +560,12 @@ impl Interactive for DistM {
         if self.length {
             return length_prompt();
         }
+        if self.arc == 1 {
+            return Prompt::new("Specify point on arc", Accept::POINT).base_opt(self.multi.as_ref().and_then(|p| p.last().copied()));
+        }
+        if self.arc == 2 {
+            return Prompt::new("Specify end point of arc", Accept::POINT);
+        }
         match (&self.multi, self.first) {
             (Some(pts), _) if pts.len() < 2 => {
                 Prompt::new("Specify second point", Accept::POINT).kw(&["Arc", "Length", "Undo"]).base_opt(pts.last().copied())
@@ -502,6 +580,30 @@ impl Interactive for DistM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Some(pts) = &mut self.multi {
+            if self.arc > 0 {
+                match i {
+                    Input::Point(p) => {
+                        if self.arc == 1 {
+                            self.arc_on = Some(p);
+                            self.arc = 2;
+                        } else if let (Some(a), Some(m)) = (pts.last().copied(), self.arc_on.take()) {
+                            let b = arc_bulge(a, m, p).unwrap_or(0.0);
+                            pts.push(p);
+                            self.bulges.push(b);
+                            self.sources.push(s.picked_viewport);
+                            self.arc = 0;
+                            let model = model_points(&self.sources);
+                            s.echo(format!("Distance = {}", fmt_d(s, path_len_b(model.as_deref().unwrap_or(pts), &self.bulges))));
+                        }
+                    }
+                    Input::Enter => {
+                        self.arc = 0;
+                        self.arc_on = None;
+                    }
+                    _ => {}
+                }
+                return Ok(Step::Continue);
+            }
             if self.length {
                 let model = model_points(&self.sources);
                 if let Some(p) = length_input(model.as_deref().unwrap_or(pts), i)? {
@@ -514,9 +616,10 @@ impl Interactive for DistM {
                         return Err(bad("dist", "the next point is too large"));
                     }
                     pts.push(paper);
+                    self.bulges.push(0.0);
                     self.sources.push(source.map(|source| crate::snap::ViewportPoint { point: p, ..source }));
                     let model = model_points(&self.sources);
-                    s.echo(format!("Distance = {}", fmt_d(s, path_len(model.as_deref().unwrap_or(pts)))));
+                    s.echo(format!("Distance = {}", fmt_d(s, path_len_b(model.as_deref().unwrap_or(pts), &self.bulges))));
                 }
                 self.length = false;
                 return Ok(Step::Continue);
@@ -524,17 +627,24 @@ impl Interactive for DistM {
             match i {
                 Input::Point(p) => {
                     pts.push(p);
+                    self.bulges.push(0.0);
                     self.sources.push(s.picked_viewport);
                     let model = model_points(&self.sources);
-                    s.echo(format!("Distance = {}", fmt_d(s, path_len(model.as_deref().unwrap_or(pts)))));
+                    s.echo(format!("Distance = {}", fmt_d(s, path_len_b(model.as_deref().unwrap_or(pts), &self.bulges))));
                 }
                 Input::Keyword(k) if k == "Undo" => {
                     if pts.len() > 1 {
                         pts.pop();
                         self.sources.pop();
+                        self.bulges.pop();
                     }
                 }
                 Input::Keyword(k) if k == "Length" => self.length = true,
+                Input::Keyword(k) if k == "Arc" => {
+                    if !pts.is_empty() {
+                        self.arc = 1;
+                    }
+                }
                 Input::Keyword(k) if k == "Total" => return self.total(s),
                 Input::Keyword(k) => s.echo(format!("{k}: not available yet")),
                 Input::Enter => return self.total(s),
@@ -571,7 +681,15 @@ impl Interactive for DistM {
     fn preview(&self, _s: &Session, c: Vec2) -> Vec<EntityKind> {
         match &self.multi {
             Some(pts) => {
-                let mut v: Vec<cadcraft_geom::PolyVertex> = pts.iter().map(|p| cadcraft_geom::PolyVertex::new(*p)).collect();
+                let mut v: Vec<cadcraft_geom::PolyVertex> = pts
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let mut pv = cadcraft_geom::PolyVertex::new(*p);
+                        pv.bulge = self.bulges.get(i).copied().unwrap_or(0.0);
+                        pv
+                    })
+                    .collect();
                 v.push(cadcraft_geom::PolyVertex::new(c));
                 vec![super::helpers::lwpoly(v, false)]
             }
@@ -583,7 +701,7 @@ impl Interactive for DistM {
 impl DistM {
     fn total(&self, s: &mut Session) -> Result<Step> {
         let model = model_points(&self.sources);
-        let d = model.as_deref().or(self.multi.as_deref()).map_or(0.0, path_len);
+        let d = model.as_deref().or(self.multi.as_deref()).map_or(0.0, |p| path_len_b(p, &self.bulges));
         s.echo(format!("Distance = {}", fmt_d(s, d)));
         Ok(Step::Done)
     }
@@ -664,6 +782,11 @@ enum AreaMode {
 #[derive(Default)]
 struct AreaM {
     pts: Vec<Vec2>,
+    /// Bulge of each completed boundary segment.
+    bulges: Vec<f64>,
+    /// Arc option in progress: 1 = waiting for the point on the arc, 2 = for its end.
+    arc: u8,
+    arc_on: Option<Vec2>,
     mode: AreaMode,
     total: f64,
     /// Selecting objects (the Object option).
@@ -694,10 +817,13 @@ impl AreaM {
     /// Close the boundary picked so far (Enter or Total at the next-point prompt).
     fn close(&mut self, s: &mut Session) -> Step {
         let pts = std::mem::take(&mut self.pts);
+        let bulges = std::mem::take(&mut self.bulges);
+        self.arc = 0;
+        self.arc_on = None;
         if pts.len() < 3 {
             return if self.mode == AreaMode::Single { Step::Done } else { Step::Continue };
         }
-        let (a, per) = area_of(&pts);
+        let (a, per) = area_of_b(&pts, &bulges);
         self.measured(s, a, per)
     }
 }
@@ -712,6 +838,12 @@ impl Interactive for AreaM {
         }
         if self.length {
             return length_prompt();
+        }
+        if self.arc == 1 {
+            return Prompt::new(format!("{}Specify point on arc", self.mode_prefix()), Accept::POINT).base_opt(self.pts.last().copied());
+        }
+        if self.arc == 2 {
+            return Prompt::new(format!("{}Specify end point of arc", self.mode_prefix()), Accept::POINT);
         }
         let next = format!("{}Specify next point", self.mode_prefix());
         match (self.pts.len(), self.mode) {
@@ -752,21 +884,56 @@ impl Interactive for AreaM {
         }
         if self.length {
             if let Some(p) = length_input(&self.pts, i)? {
+                if !self.pts.is_empty() {
+                    self.bulges.push(0.0);
+                }
                 self.pts.push(p);
             }
             self.length = false;
             return Ok(Step::Continue);
         }
+        if self.arc > 0 {
+            match i {
+                Input::Point(p) => {
+                    if self.arc == 1 {
+                        self.arc_on = Some(p);
+                        self.arc = 2;
+                    } else if let (Some(a), Some(m)) = (self.pts.last().copied(), self.arc_on.take()) {
+                        let b = arc_bulge(a, m, p).unwrap_or(0.0);
+                        self.pts.push(p);
+                        self.bulges.push(b);
+                        self.arc = 0;
+                    }
+                }
+                Input::Enter => {
+                    self.arc = 0;
+                    self.arc_on = None;
+                }
+                _ => {}
+            }
+            return Ok(Step::Continue);
+        }
         match i {
-            Input::Point(p) => self.pts.push(p),
+            Input::Point(p) => {
+                if !self.pts.is_empty() {
+                    self.bulges.push(0.0);
+                }
+                self.pts.push(p);
+            }
             Input::Keyword(k) => match k.as_str() {
                 "Object" => self.object = true,
                 "Add area" => self.mode = AreaMode::Add,
                 "Subtract area" => self.mode = AreaMode::Subtract,
                 "Undo" => {
                     self.pts.pop();
+                    self.bulges.pop();
                 }
                 "Length" => self.length = true,
+                "Arc" => {
+                    if !self.pts.is_empty() {
+                        self.arc = 1;
+                    }
+                }
                 "Total" => return Ok(self.close(s)),
                 _ => s.echo(format!("{k}: not available yet")),
             },
@@ -784,7 +951,16 @@ impl Interactive for AreaM {
         if self.pts.is_empty() || self.object || self.length {
             return Vec::new();
         }
-        let mut v: Vec<cadcraft_geom::PolyVertex> = self.pts.iter().map(|p| cadcraft_geom::PolyVertex::new(*p)).collect();
+        let mut v: Vec<cadcraft_geom::PolyVertex> = self
+            .pts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let mut pv = cadcraft_geom::PolyVertex::new(*p);
+                pv.bulge = self.bulges.get(i).copied().unwrap_or(0.0);
+                pv
+            })
+            .collect();
         v.push(cadcraft_geom::PolyVertex::new(c));
         vec![super::helpers::lwpoly(v, true)]
     }
