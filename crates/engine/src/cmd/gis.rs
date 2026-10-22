@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 use super::file::{base64_decode, base64_encode, io};
 use super::*;
-use crate::{EngineError, Result, Session};
+use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -44,17 +44,20 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ovimap.georef", "Set OviMap Georef…", run_georef)
             .menu(&["Tools", "OviMap", "Set Georef…"])
             .params("{originLat, originLon, centralMeridian? (= originLon)} → {georef}")
-            .alias(&["ovimapgeoref"]),
+            .alias(&["ovimapgeoref"])
+            .interactive(|_| Ok(Box::<GeorefM>::default())),
         CommandSpec::new("ovimap.push", "Push to OviMap…", run_push)
             .menu(&["Tools", "OviMap", "Push to OviMap…"])
             .params("{projectId, baseRev? (= 0), geojson? (default: export of the current drawing), dxfBase64? | dxf?: true (export DXF too), baseUrl? | token? | deviceId? | deviceName? (else CADCRAFT_OVIMAP_* env)} → {outcome: updated | conflict, rev?, serverGeojson?, serverDxfBase64?}; 409 → conflict, never an overwrite")
             .alias(&["ovimappush"])
-            .noundo(),
+            .noundo()
+            .interactive(|_| Ok(Box::new(ProjectIdM { push: true }))),
         CommandSpec::new("ovimap.pull", "Pull from OviMap…", run_pull)
             .menu(&["Tools", "OviMap", "Pull from OviMap…"])
             .params("{projectId, baseUrl? | token? | deviceId? | deviceName? (else CADCRAFT_OVIMAP_* env)} → {rev, updatedAt, geojson, dxfBase64?, hasDxf}; returns the server copy only — import it with ovimap.import")
             .alias(&["ovimappull"])
-            .noundo(),
+            .noundo()
+            .interactive(|_| Ok(Box::new(ProjectIdM { push: false }))),
     ]
 }
 
@@ -633,6 +636,128 @@ fn run_georef(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.doc_mut()?.georef = Some(g);
     Ok(json!({ "georef": g.to_json(), "warnings": warnings }))
+}
+
+/// ovimap.georef typed (audit F-class): the Tools menu item asks for the origin
+/// latitude and longitude as prompts (central meridian = origin longitude). The
+/// basemap dialog keeps calling the JSON form with its own picked centre.
+#[derive(Default)]
+pub struct GeorefM {
+    lat: Option<f64>,
+}
+
+impl Interactive for GeorefM {
+    fn name(&self) -> &'static str {
+        "OVIMAP.GEOREF"
+    }
+    fn prompt(&self, s: &Session) -> Prompt {
+        let (msg, cur) = match self.lat {
+            None => ("Enter origin latitude", s.doc().ok().and_then(|d| d.georef).map(|g| g.origin_lat)),
+            Some(_) => ("Enter origin longitude", s.doc().ok().and_then(|d| d.georef).map(|g| g.origin_lon)),
+        };
+        let p = Prompt::new(msg, Accept::TEXT);
+        match cur {
+            Some(v) => p.default(format!("{v:.6}")),
+            None => p,
+        }
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        let text = match i {
+            Input::Cancel => return Ok(Step::Done),
+            Input::Enter => None,
+            Input::Text(t) => Some(t.trim().to_string()),
+            _ => return Ok(Step::Continue),
+        };
+        let cur = s.doc().ok().and_then(|d| d.georef);
+        let value = match text.as_deref() {
+            None | Some("") => match self.lat {
+                None => cur.map(|g| g.origin_lat),
+                Some(_) => cur.map(|g| g.origin_lon),
+            },
+            Some(t) => super::machines::number(t),
+        };
+        let Some(v) = value else {
+            s.echo("*Invalid number*");
+            return Ok(Step::Continue);
+        };
+        match self.lat {
+            None => {
+                if !(-90.0..=90.0).contains(&v) {
+                    s.echo("Latitude must be between -90 and 90.");
+                    return Ok(Step::Continue);
+                }
+                self.lat = Some(v);
+                Ok(Step::Continue)
+            }
+            Some(lat) => {
+                if !(-180.0..=180.0).contains(&v) {
+                    s.echo("Longitude must be between -180 and 180.");
+                    return Ok(Step::Continue);
+                }
+                let r = run_georef(s, &json!({ "originLat": lat, "originLon": v }))?;
+                if let Some(ws) = r.get("warnings").and_then(Value::as_array) {
+                    for w in ws {
+                        if let Some(w) = w.as_str() {
+                            s.echo(w);
+                        }
+                    }
+                }
+                s.echo(format!("Georeference set: origin {lat:.6}, {v:.6}."));
+                Ok(Step::Done)
+            }
+        }
+    }
+}
+
+/// ovimap.push / ovimap.pull typed (audit F-class): both need a project id; the
+/// bridge settings (base URL, token) come from the CADCRAFT_OVIMAP_* environment,
+/// exactly as the JSON form documents.
+pub struct ProjectIdM {
+    push: bool,
+}
+
+impl Interactive for ProjectIdM {
+    fn name(&self) -> &'static str {
+        if self.push { "OVIMAP.PUSH" } else { "OVIMAP.PULL" }
+    }
+    fn prompt(&self, _s: &Session) -> Prompt {
+        Prompt::new("Enter OviMap project id", Accept::TEXT)
+    }
+    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        match i {
+            Input::Cancel => Ok(Step::Done),
+            Input::Text(t) => {
+                let id = t.trim().to_string();
+                if id.is_empty() {
+                    return Ok(Step::Continue);
+                }
+                if self.push {
+                    match run_push(s, &json!({ "projectId": id })) {
+                        Ok(r) => {
+                            let outcome = r.get("outcome").and_then(Value::as_str).unwrap_or("");
+                            let rev = r.get("rev").and_then(Value::as_u64);
+                            match (outcome, rev) {
+                                ("conflict", _) => s.echo("Push conflict: the server copy is newer; pull first. Nothing was overwritten."),
+                                (_, Some(rev)) => s.echo(format!("Pushed to OviMap (rev {rev}).")),
+                                _ => s.echo("Pushed to OviMap."),
+                            }
+                        }
+                        Err(e) => s.echo(e.to_string()),
+                    }
+                } else {
+                    match run_pull(s, &json!({ "projectId": id })) {
+                        Ok(r) => {
+                            let rev = r.get("rev").and_then(Value::as_u64).unwrap_or(0);
+                            s.echo(format!("Pulled rev {rev} from OviMap. Apply it with ovimap.import on the returned data (JSON form)."));
+                        }
+                        Err(e) => s.echo(e.to_string()),
+                    }
+                }
+                Ok(Step::Done)
+            }
+            _ => Ok(Step::Continue),
+        }
+    }
 }
 
 /// The bridge client for a call: explicit params win, then the
