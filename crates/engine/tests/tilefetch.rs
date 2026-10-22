@@ -308,6 +308,88 @@ fn fetch_both_sources_failing_stays_blank() {
     cleanup_cache(&layer.fallback_layer().expect("fallback configured"), &t);
 }
 
+/// Zooming in follows the view: the queue is newest-first, so the tiles of
+/// the view on screen are fetched before stale tiles queued for views
+/// already left — a zoom landing on a fresh level must not wait behind
+/// hundreds of fetches for the previous level.
+#[test]
+fn fetcher_newest_view_fetched_first() {
+    use std::sync::atomic::AtomicUsize;
+    let first = Arc::new(AtomicUsize::new(0));
+    let first2 = Arc::clone(&first);
+    let stub = Stub::new(move |_| {
+        // The first request stalls the single worker while the rest are
+        // enqueued, so the queue order decides what is fetched first.
+        if first2.fetch_add(1, Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        (200, "image/png", PNG_1X1.to_vec())
+    });
+    let layer = layer_for(&stub);
+    let fetcher = TileFetcher::new(1, fast_opts());
+    let stale: Vec<TileRef> =
+        (0..10).map(|x| TileRef { z: 10, x, y: 0, url: layer.tile_url(10, x, 0), cache_key: layer.cache_key(10, x, 0) }).collect();
+    let current: Vec<TileRef> =
+        (100..110).map(|x| TileRef { z: 10, x, y: 0, url: layer.tile_url(10, x, 0), cache_key: layer.cache_key(10, x, 0) }).collect();
+    for t in &stale {
+        fetcher.request(&layer, t);
+    }
+    for t in &current {
+        fetcher.request(&layer, t);
+    }
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while fetcher.pending() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(fetcher.pending(), 0, "the queue must drain");
+    let pos = |needle: &str| stub.seen.lock().unwrap().iter().position(|req| req.contains(needle));
+    let stale_last = stale.iter().skip(1).filter_map(|t| pos(&format!("/{}/{}/0.png", t.z, t.x))).max();
+    let current_first = current.iter().filter_map(|t| pos(&format!("/{}/{}/0.png", t.z, t.x))).min();
+    let (stale_last, current_first) = (stale_last.expect("a stale tile was fetched"), current_first.expect("a current tile was fetched"));
+    assert!(
+        current_first < stale_last,
+        "the current view's tiles must be fetched before stale queued tiles (first current at {current_first}, last stale at {stale_last})"
+    );
+    assert!(current.iter().all(|t| pos(&format!("/{}/{}/0.png", t.z, t.x)).is_some()), "every current-view tile is fetched");
+    for t in stale.iter().chain(current.iter()).take(2) {
+        cleanup_cache(&layer, t);
+    }
+}
+
+/// Rate limiting paces each worker individually (concurrency ≤4 stays the
+/// politeness bound): four workers must not serialise every request start
+/// through one global pacer.
+#[test]
+fn fetcher_workers_pace_individually() {
+    let stub = Stub::new(|_| (200, "image/png", PNG_1X1.to_vec()));
+    let layer = layer_for(&stub);
+    let opts = FetchOptions {
+        timeout: Duration::from_secs(5),
+        max_attempts: 1,
+        backoff_base: Duration::from_millis(1),
+        min_gap: Duration::from_millis(400),
+    };
+    let fetcher = TileFetcher::new(4, opts);
+    let tiles: Vec<TileRef> =
+        (0..8).map(|x| TileRef { z: 10, x, y: 0, url: layer.tile_url(10, x, 0), cache_key: layer.cache_key(10, x, 0) }).collect();
+    let start = Instant::now();
+    for t in &tiles {
+        fetcher.request(&layer, t);
+    }
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while fetcher.pending() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(fetcher.pending(), 0, "the queue must drain");
+    let elapsed = start.elapsed();
+    // One global pacer would start the 8 requests over ≥ 2.8 s; four
+    // individually paced workers need ~2 rounds of 400 ms.
+    assert!(elapsed < Duration::from_secs(2), "four workers must pace individually, took {elapsed:?}");
+    for t in tiles.iter().take(1) {
+        cleanup_cache(&layer, t);
+    }
+}
+
 /// Panning follows the view: a burst of 600 tile requests (several pans'
 /// worth) must not bury the newest view's tiles behind stale ones. The
 /// queue is capped (512): the oldest queued tiles are dropped, the newest
