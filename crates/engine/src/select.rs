@@ -84,8 +84,80 @@ fn dist_to_polyline(pts: &[Vec2], p: Vec2) -> f64 {
     pts.windows(2).filter_map(|w| Some(Line::new(*w.first()?, *w.get(1)?).dist(p))).fold(f64::INFINITY, f64::min)
 }
 
+/// Distance from `p` to a closed contour (the last point joins back to the first).
+fn dist_to_contour(pts: &[Vec2], p: Vec2) -> f64 {
+    let mut best = dist_to_polyline(pts, p);
+    if let (Some(a), Some(b)) = (pts.first(), pts.last())
+        && pts.len() > 2
+    {
+        best = best.min(Line::new(*b, *a).dist(p));
+    }
+    best
+}
+
+/// The glyph ink of a plain-text entity (TEXT, MTEXT, ATTDEF): closed outlines grouped per
+/// glyph and open stroke polylines, in world coordinates — what is actually drawn. `None`
+/// for other kinds, and for text whose layout has no ink (empty, spaces only), where the
+/// caller keeps the frame-box behaviour.
+fn text_ink(d: &Drawing, e: &Entity) -> Option<(Vec<Vec<Vec<Vec2>>>, Vec<Vec<Vec2>>)> {
+    let mut glyphs: Vec<Vec<Vec<Vec2>>> = Vec::new();
+    let mut strokes: Vec<Vec<Vec2>> = Vec::new();
+    match &e.kind {
+        EntityKind::Text(t) => {
+            let (sh, _) = cadcraft_render::place_text_entity(d, t, &t.value);
+            glyphs = sh.glyphs;
+            strokes = sh.strokes;
+        }
+        EntityKind::AttDef(a) => {
+            let (sh, _) = cadcraft_render::place_text_entity(d, &a.text, &a.tag);
+            glyphs = sh.glyphs;
+            strokes = sh.strokes;
+        }
+        EntityKind::MText(t) => {
+            for piece in cadcraft_render::layout_mtext_entity(d, t).pieces {
+                glyphs.extend(piece.shaped.glyphs);
+                strokes.extend(piece.shaped.strokes);
+            }
+        }
+        _ => return None,
+    }
+    if glyphs.is_empty() && strokes.is_empty() { None } else { Some((glyphs, strokes)) }
+}
+
+/// Distance from `p` to text ink: 0 on a glyph (inside its outline, even-odd over the
+/// glyph's contours) or on a stroke, else the distance to the nearest outline or stroke.
+fn ink_distance(glyphs: &[Vec<Vec<Vec2>>], strokes: &[Vec<Vec2>], p: Vec2) -> f64 {
+    let mut best = f64::INFINITY;
+    for g in glyphs {
+        if g.iter().filter(|c| point_in_polygon(c, p)).count() % 2 == 1 {
+            return 0.0;
+        }
+        for c in g {
+            best = best.min(dist_to_contour(c, p));
+        }
+    }
+    for s in strokes {
+        best = best.min(dist_to_polyline(s, p));
+    }
+    best
+}
+
 /// Distance from `p` to the entity (0 inside text boxes and solid fills).
 pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
+    // Plain text is measured to its glyph ink, not its frame: the frame spans the gaps
+    // between letters and the padding around the line, so a frame hit (distance 0 across
+    // the whole box) made text swallow every pick of the line work it sits on. Inside the
+    // frame the text still counts at the distance to the frame's edge, so aiming at the
+    // text (its corner, its padding) finds it, while line work crossing the frame's
+    // interior — distance 0 there — stays nearer and wins.
+    if let Some((glyphs, strokes)) = text_ink(d, e) {
+        let ink = ink_distance(&glyphs, &strokes, p);
+        if ink == 0.0 {
+            return 0.0;
+        }
+        let b = entity_bounds(d, e, 0);
+        return if b.contains(p) { ink.min(dist_to_contour(&b.corners(), p)) } else { ink };
+    }
     let polys = hit_polylines(d, e, tol);
     let mut best = polys.iter().map(|pl| dist_to_polyline(pl, p)).fold(f64::INFINITY, f64::min);
     let filled = matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Table(_))
@@ -618,5 +690,112 @@ mod hatch_pattern_pick_tests {
         // Ignore style fills over the island.
         let d = solid_hatch(loops(), 2);
         assert!(pick(&d, &Space::Model, Vec2::new(5.0, 5.0), 0.05).is_some());
+    }
+}
+
+#[cfg(test)]
+mod text_pick_tests {
+    use super::*;
+    use cadcraft_doc::Common;
+
+    fn sample_text(value: &str) -> cadcraft_doc::Text {
+        cadcraft_doc::Text {
+            insert: Vec2::new(0.0, -0.5).to3(0.0),
+            align_pt: None,
+            height: 2.0,
+            value: value.into(),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".into(),
+            halign: Default::default(),
+            valign: Default::default(),
+        }
+    }
+
+    fn base_line(d: &mut Drawing) -> Handle {
+        d.add(
+            &Space::Model,
+            Common::default(),
+            EntityKind::Line(cadcraft_doc::Line { a: Vec2::new(-5.0, 0.0).to3(0.0), b: Vec2::new(25.0, 0.0).to3(0.0) }),
+        )
+        .unwrap()
+    }
+
+    /// A line along y = 0 running behind the text "H H" (baseline at y = -0.5, drawn
+    /// after the line): the line crosses the text's frame box between the letters —
+    /// the label-over-a-line case from real drawings.
+    fn line_under_text() -> (Drawing, Handle, Handle) {
+        let mut d = Drawing::new_metric();
+        let line = base_line(&mut d);
+        let text = d.add(&Space::Model, Common::default(), EntityKind::Text(sample_text("H H"))).unwrap();
+        (d, line, text)
+    }
+
+    #[test]
+    fn pick_on_the_line_in_a_letter_gap_takes_the_line_not_the_text() {
+        let (d, line, text) = line_under_text();
+        let te = d.entity(text).unwrap();
+        let (sh, _) = cadcraft_render::place_text_entity(&d, &sample_text("H H"), "H H");
+        // The middle of the string is the space between the two letters: on the line,
+        // inside the text's frame, but on no glyph. The frame used to make this a
+        // distance-0 text hit that swallowed the line's pick.
+        let gap = Vec2::new(sh.width / 2.0, 0.0);
+        assert!(entity_bounds(&d, te, 0).contains(gap), "the gap point sits inside the text frame");
+        assert!(entity_distance(&d, te, gap, 0.05) > 0.3, "ink distance at the gap: {}", entity_distance(&d, te, gap, 0.05));
+        assert_eq!(pick(&d, &Space::Model, gap, 0.3), Some(line));
+    }
+
+    #[test]
+    fn pick_on_a_glyph_takes_the_text() {
+        let (d, _line, text) = line_under_text();
+        let te = d.entity(text).unwrap();
+        let (sh, _) = cadcraft_render::place_text_entity(&d, &sample_text("H H"), "H H");
+        // A vertex of the first drawn stroke is on the ink by construction.
+        let on_ink = sh.strokes.first().and_then(|s| s.first()).copied().unwrap();
+        assert_eq!(entity_distance(&d, te, on_ink, 0.05), 0.0);
+        assert_eq!(pick(&d, &Space::Model, on_ink, 0.2), Some(text));
+    }
+
+    #[test]
+    fn pick_inside_the_frame_but_off_the_ink_selects_nothing() {
+        let (d, _line, text) = line_under_text();
+        let te = d.entity(text).unwrap();
+        let b = entity_bounds(&d, te, 0);
+        // The centre of the frame is the letter gap, far from ink and from every edge:
+        // the frame alone used to make it a distance-0 text hit.
+        let centre = Vec2::new(b.min.x + b.width() / 2.0, b.min.y + b.height() / 2.0);
+        assert!(b.contains(centre));
+        assert!(entity_distance(&d, te, centre, 0.05) > 0.3, "distance at the frame centre: {}", entity_distance(&d, te, centre, 0.05));
+        assert_eq!(pick(&d, &Space::Model, centre, 0.1), None);
+        // Empty space far away picks nothing either.
+        assert_eq!(pick(&d, &Space::Model, Vec2::new(100.0, 100.0), 0.3), None);
+    }
+
+    #[test]
+    fn mtext_pick_uses_glyph_ink_too() {
+        let mut d = Drawing::new_metric();
+        let line = base_line(&mut d);
+        let mt = cadcraft_doc::MText {
+            insert: Vec2::new(0.0, 2.0).to3(0.0),
+            height: 2.0,
+            width: 0.0,
+            attach: 7,
+            rotation: 0.0,
+            style: "Standard".into(),
+            contents: "H H".into(),
+            line_spacing: 1.0,
+            line_spacing_exact: false,
+            columns: None,
+        };
+        let text = d.add(&Space::Model, Common::default(), EntityKind::MText(mt.clone())).unwrap();
+        let layout = cadcraft_render::layout_mtext_entity(&d, &mt);
+        // On a stroke vertex of the laid-out mtext: the mtext is picked.
+        let on_ink = layout.strokes.first().and_then(|s| s.first()).copied().unwrap();
+        assert_eq!(pick(&d, &Space::Model, on_ink, 0.2), Some(text));
+        // On the line far below the mtext's ink but inside its frame column span, the
+        // line — not the mtext — is within reach.
+        let below = Vec2::new(on_ink.x, 0.0);
+        assert_eq!(pick(&d, &Space::Model, below, 0.3), Some(line));
     }
 }

@@ -1083,6 +1083,12 @@ impl Session {
         if !prompt.accept.select {
             return Ok(Some(input));
         }
+        // At a selection prompt a shift-pick is an ordinary pick (Shift toggles the
+        // selection inside the pick itself); the flip meaning only exists at point prompts.
+        let input = match input {
+            Input::PointShift(p) => Input::Point(p),
+            other => other,
+        };
         if self.select_mode.is_some() {
             return self.select_mode_input(input);
         }
@@ -1189,12 +1195,12 @@ impl Session {
     }
 
     fn feed(&mut self, input: Option<Input>) -> Result<()> {
-        let base = if matches!(input, Some(Input::Point(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
+        let base = if matches!(input, Some(Input::Point(_) | Input::PointShift(_))) { self.current_prompt().and_then(|p| p.base) } else { None };
         let Some(mut run) = self.running.take() else { return Ok(()) };
         let step = match input {
             Some(Input::Cancel) => Ok(Step::Cancel),
             Some(i) => {
-                if let Input::Point(p) = &i {
+                if let Input::Point(p) | Input::PointShift(p) = &i {
                     self.last_point = *p;
                     if let Some(b) = base.filter(|b| b.is_finite() && p.is_finite() && b.dist(*p) > 1e-12) {
                         self.last_segment = Some((b, *p));

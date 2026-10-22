@@ -25,7 +25,10 @@
 //!   EXTTEXTOUTA/W (with ETO_OPAQUE background and per-character Dx advances).
 //! - Text is shaped with the resolved font ([`cadcraft_fonts::place`] without Dx, per
 //!   character with Dx), the escapement rotation applied in device space after the
-//!   logical-to-device map, as LOGFONT specifies it on the device x-axis.
+//!   logical-to-device map, as LOGFONT specifies it on the device x-axis. The LOGFONT
+//!   height is an em height and is converted to this crate's cap-height size first
+//!   ([`cadcraft_fonts::em_to_cap`]): shaping at the raw height would inflate every
+//!   glyph ~1.5x over its Dx advance and the row pitch (the OLE-table overlap bug).
 //!
 //! Deliberate approximations, all documented here so a reader knows where fidelity ends:
 //! - Raster records (BITBLT, STRETCHBLT, MASKBLT, PLGBLT, SETDIBITSTODEVICE,
@@ -1821,6 +1824,8 @@ fn handle_ext_text(rec: &[u8], wide: bool, dc: &mut Dc, out: &mut Out) {
     }
     let font = dc.font.clone().unwrap_or(Font { face: String::new(), height: 12.0, escapement: 0.0, italic: false });
     let text_font = TextFont::resolve(&font.face);
+    // LOGFONT heights are em heights; the shaper sizes by cap height (see module docs).
+    let cap_h = cadcraft_fonts::em_to_cap(&text_font, font.height);
     let oblique = if font.italic { 0.2 } else { 0.0 };
     let (h, v) = text_align(dc.text_align);
     let mapped_ref = dc.map(reference);
@@ -1859,13 +1864,13 @@ fn handle_ext_text(rec: &[u8], wide: bool, dc: &mut Dc, out: &mut Out) {
             Align::Right => -total_width,
             _ => 0.0,
         };
-        let dy = v_offset(v, font.height);
+        let dy = v_offset(v, cap_h);
         let mut run = cadcraft_fonts::Shaped::default();
         let mut cum = 0.0;
         for (ch, adv) in &pairs {
             let mut buf = [0u8; 4];
             let s = ch.encode_utf8(&mut buf);
-            let mut sh = cadcraft_fonts::shape_line(&text_font, s, font.height, 1.0, oblique);
+            let mut sh = cadcraft_fonts::shape_line(&text_font, s, cap_h, 1.0, oblique);
             let x = cum + align_off;
             sh.map(|p| to_dev(p + Vec2::new(x, dy)));
             run.extend(sh);
@@ -1885,7 +1890,7 @@ fn handle_ext_text(rec: &[u8], wide: bool, dc: &mut Dc, out: &mut Out) {
         let params = TextParams {
             insert: Vec2::ZERO,
             align_pt: Some(Vec2::ZERO),
-            height: font.height,
+            height: cap_h,
             rotation: 0.0,
             width_factor: 1.0,
             oblique,
@@ -2085,6 +2090,68 @@ mod tests {
         assert!(ys.iter().all(|&y| (70.0..=90.0).contains(&y)), "text y range {ys:?}");
         let xs: Vec<f64> = sh.outlines().iter().flatten().map(|p| p.x).collect();
         assert!(xs.iter().all(|&x| x >= 20.0 - 1e-9));
+    }
+
+    /// Regression (OLE tables rendered as overlapped mush): a LOGFONT height is an
+    /// **em** height. Excel writes per-character Dx advances where a full-width
+    /// glyph's advance equals |lfHeight|; shaping the glyphs at the raw height —
+    /// a cap height to the shaper — inflates them by 1/(cap ratio) (~1.5x for the
+    /// Song family) over their advances, so neighbours and rows overlap.
+    #[test]
+    fn ext_text_out_dx_glyphs_fit_their_em_height_and_advances() {
+        // EXTCREATEFONTINDIRECTW: ihFont 3, LOGFONTW with lfHeight -100, face 宋体.
+        let mut f = Vec::new();
+        f.extend_from_slice(&u32b(3));
+        f.extend_from_slice(&i32b(-100)); // lfHeight: an em height of 100
+        f.extend_from_slice(&i32b(0)); // lfWidth
+        f.extend_from_slice(&i32b(0)); // lfEscapement
+        f.extend_from_slice(&i32b(0)); // lfOrientation
+        f.extend_from_slice(&i32b(400)); // lfWeight
+        f.extend_from_slice(&[0; 8]); // italic..pitchAndFamily
+        let mut face = Vec::new();
+        for u in "宋体".encode_utf16() {
+            face.extend_from_slice(&u.to_le_bytes());
+        }
+        face.resize(64, 0);
+        f.extend_from_slice(&face); // lfFaceName
+        let font_rec = rec(82, &f);
+        // EXTTEXTOUTW "项目名称" at (0, 0) with Dx = 100 per char (1 em each).
+        let text = "项目名称";
+        let n = text.chars().count() as u32;
+        let mut t = Vec::new();
+        t.extend_from_slice(&rect(0, 0, 400, 100)); // Bounds
+        t.extend_from_slice(&u32b(0)); // iGraphicsMode
+        t.extend_from_slice(&1.0f32.to_le_bytes()); // exScale
+        t.extend_from_slice(&1.0f32.to_le_bytes()); // eyScale
+        t.extend_from_slice(&point(0, 0)); // ptlReference
+        t.extend_from_slice(&u32b(n)); // nChars
+        t.extend_from_slice(&u32b(76)); // offString
+        t.extend_from_slice(&u32b(0)); // fOptions
+        t.extend_from_slice(&rect(0, 0, 400, 100)); // rcl
+        t.extend_from_slice(&u32b(76 + n * 2)); // offDx
+        for u in text.encode_utf16() {
+            t.extend_from_slice(&u.to_le_bytes());
+        }
+        for _ in 0..n {
+            t.extend_from_slice(&i32b(100));
+        }
+        let text_rec = rec(84, &t);
+        let records = vec![
+            font_rec,
+            select(3),
+            rec(24, &u32b(0)), // SETTEXTCOLOR black
+            rec(22, &u32b(0)), // SETTEXTALIGN TA_LEFT | TA_TOP
+            text_rec,
+        ];
+        let parsed = parse_emf(&emf((0, 0, 400, 100), records));
+        assert_eq!(parsed.texts.len(), 1);
+        let (_, sh) = &parsed.texts[0];
+        assert_eq!(sh.glyphs.len(), n as usize, "one glyph group per character");
+        for (i, g) in sh.glyphs.iter().enumerate() {
+            let b = Bounds2::from_points(g.iter().flatten().copied());
+            assert!(b.width() <= 102.0, "glyph {i} ink width {} overflows its 100-unit advance", b.width());
+            assert!(b.height() <= 102.0, "glyph {i} ink height {} overflows its 100-unit em", b.height());
+        }
     }
 
     #[test]

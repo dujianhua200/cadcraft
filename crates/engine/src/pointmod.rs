@@ -261,13 +261,13 @@ impl Session {
     pub(crate) fn modifier_input(&mut self, input: Input) -> Result<()> {
         // An angle override only constrains a point: anything else goes to the prompt below it.
         if let Some(Frame::Angle { .. }) = self.point_mods.last()
-            && !matches!(input, Input::Point(_) | Input::Deferred(_))
+            && !matches!(input, Input::Point(_) | Input::PointShift(_) | Input::Deferred(_))
         {
             self.point_mods.pop();
             return self.input(input);
         }
         match input {
-            Input::Point(p) => self.modifier_point(p),
+            Input::Point(p) | Input::PointShift(p) => self.modifier_point(p),
             // A deferred tangent/perpendicular picked under a TAN/PER override.
             Input::Deferred(d) if matches!(self.point_mods.as_slice(), [Frame::Snap { .. }]) => {
                 self.point_mods.clear();
@@ -290,7 +290,7 @@ impl Session {
                 self.point_mods.clear();
                 self.input(Input::Cancel)
             }
-            Input::Keyword(_) | Input::Text(_) | Input::Pick(_) => {
+            Input::Keyword(_) | Input::Text(_) | Input::Pick(_) | Input::DragPath(_) => {
                 self.echo("Invalid point.");
                 Ok(())
             }

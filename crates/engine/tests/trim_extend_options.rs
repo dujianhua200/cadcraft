@@ -201,3 +201,112 @@ fn json_forms_take_fence_crossing_edge_mode_and_mode() {
     assert_eq!(r["extended"], 1);
     assert_eq!(lines(&s), vec![((0.0, 0.0), (10.0, 0.0)), ((10.0, -5.0), (10.0, 5.0))]);
 }
+
+#[test]
+fn shift_pick_extends_during_trim() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    // A boundary line at x = 10 and a short line at y = 3 that nothing crosses:
+    // a plain pick would erase it (Quick mode), a shift-pick extends it instead.
+    let mut s = session(&["10,-5 10,5", "2,3 6,3"]);
+    s.cmdline("TRIM").unwrap();
+    assert!(s.running.is_some());
+    s.input(Input::PointShift(Vec2::new(6.0, 3.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), vec![((2.0, 3.0), (10.0, 3.0)), ((10.0, -5.0), (10.0, 5.0))]);
+}
+
+#[test]
+fn shift_pick_trims_during_extend() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    let mut s = ladder();
+    s.cmdline("EXTEND").unwrap();
+    // Shift-pick the y = 0 line between the two edges: the picked piece trims away.
+    s.input(Input::PointShift(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (15.0, 2.0)), ((10.0, 0.0), (15.0, 0.0))]));
+}
+
+#[test]
+fn shift_pick_at_a_selection_prompt_is_an_ordinary_pick() {
+    use cadcraft_engine::Input;
+    use cadcraft_engine::geom::Vec2;
+    let mut s = ladder();
+    s.cmdline("TRIM").unwrap();
+    s.input(Input::Keyword("cuTting edges".into())).unwrap();
+    // Shift held while choosing the cutting edge: still just picks it (x = 0 only).
+    s.input(Input::PointShift(Vec2::new(0.0, 4.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(lines(&s), with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (15.0, 2.0))]));
+}
+
+// ---------- freehand drag path (Input::DragPath) ----------
+
+use cadcraft_engine::Input;
+use cadcraft_engine::geom::Vec2;
+
+fn drag(s: &mut Session, pts: &[(f64, f64)]) {
+    s.input(Input::DragPath(pts.iter().map(|&(x, y)| Vec2::new(x, y)).collect())).unwrap();
+}
+
+#[test]
+fn drag_path_trims_everything_it_crosses_in_quick_mode() {
+    let mut s = ladder();
+    s.cmdline("TRIM").unwrap();
+    assert!(s.drag_trim_active(), "{}", s.prompt_text());
+    // The same stroke the Fence test draws by clicks: x = 5 from y = -1 to y = 3.
+    drag(&mut s, &[(5.0, -1.0), (5.0, 3.0)]);
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert!(!s.drag_trim_active());
+    assert_eq!(
+        lines(&s),
+        with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (0.0, 2.0)), ((10.0, 0.0), (15.0, 0.0)), ((10.0, 2.0), (15.0, 2.0))])
+    );
+}
+
+#[test]
+fn drag_path_extends_what_it_crosses() {
+    // Boundary edge at x = 10; a short line ending at x = 5 on y = 0.
+    let mut s = session(&["10,-5 10,5", "0,0 5,0"]);
+    s.cmdline("EXTEND").unwrap();
+    assert!(s.drag_trim_active(), "{}", s.prompt_text());
+    // Crossed near the end that has to grow (extend grows the end nearer the pick).
+    drag(&mut s, &[(4.0, -1.0), (4.0, 1.0)]);
+    s.input(Input::Enter).unwrap();
+    assert!(lines(&s).contains(&((0.0, 0.0), (10.0, 0.0))), "{:?}", lines(&s));
+    assert!(lines(&s).contains(&((10.0, -5.0), (10.0, 5.0))));
+}
+
+#[test]
+fn drag_path_appends_points_in_the_fence_stage() {
+    let mut s = ladder();
+    s.cmdline("TRIM").unwrap();
+    s.input(Input::Keyword("Fence".into())).unwrap();
+    assert!(s.drag_trim_active(), "{}", s.prompt_text());
+    drag(&mut s, &[(5.0, -1.0), (5.0, 3.0)]);
+    s.input(Input::Enter).unwrap();
+    s.input(Input::Enter).unwrap();
+    assert!(s.running.is_none(), "{}", s.prompt_text());
+    assert_eq!(
+        lines(&s),
+        with_edges(&[((-5.0, 0.0), (0.0, 0.0)), ((-5.0, 2.0), (0.0, 2.0)), ((10.0, 0.0), (15.0, 0.0)), ((10.0, 2.0), (15.0, 2.0))])
+    );
+}
+
+#[test]
+fn drag_path_is_ignored_by_other_commands() {
+    let mut s = Session::new();
+    assert!(!s.drag_trim_active());
+    s.cmdline("LINE").unwrap();
+    assert!(!s.drag_trim_active(), "{}", s.prompt_text());
+    let _ = s.input(Input::DragPath(vec![Vec2::new(0.0, 0.0), Vec2::new(5.0, 5.0)]));
+    assert!(lines(&s).is_empty(), "a drag path must not draw: {:?}", lines(&s));
+    s.input(Input::Cancel).unwrap();
+}

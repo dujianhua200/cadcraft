@@ -100,7 +100,7 @@ impl GetRequest {
                 Ok(Value::Nil)
             }
             Input::Keyword(k) => Ok(Value::str(&k)),
-            Input::Point(p) => self.point(s, [p.x, p.y, 0.0]),
+            Input::Point(p) | Input::PointShift(p) => self.point(s, [p.x, p.y, 0.0]),
             // A deferred tangent/perpendicular snap is the point it was picked at here.
             Input::Deferred(d) => self.point(s, [d.at.x, d.at.y, 0.0]),
             Input::Pick(hs) => match (self.kind, hs.first()) {
@@ -108,6 +108,8 @@ impl GetRequest {
                 _ => Err("Invalid point.".into()),
             },
             Input::Text(t) => self.text(s, &t),
+            // A freehand drag path answers no getxxx prompt.
+            Input::DragPath(_) => Err("Invalid point.".into()),
             Input::Cancel => Err("*Cancel*".into()),
         }
     }

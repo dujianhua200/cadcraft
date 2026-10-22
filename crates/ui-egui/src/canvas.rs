@@ -123,6 +123,9 @@ pub struct CanvasState {
     pub(crate) tilemap: crate::tiles::TileCache,
     /// A selection window opened by a press-and-drag, to close where the button is let go.
     drag_window: bool,
+    /// A freehand TRIM/EXTEND drag path being collected (world points): a press that
+    /// never really moves stays a click, decided by the path's on-screen length.
+    drag_trim: Option<Vec<Vec2>>,
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -1416,7 +1419,36 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         && app.session.pending_window.is_none()
         && !app.session.realtime_zoom_active();
     let pressed_primary = pressed_primary || (point_prompt && resp.drag_stopped_by(egui::PointerButton::Primary));
-    if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() {
+    // Freehand trim/extend: while TRIM/EXTEND waits for picks, a primary drag lays down a
+    // trim path instead of placing points or opening a window; the path is fed whole on
+    // release. A press that never really moves stays a click (handled as usual below).
+    let drag_trimming = app.session.drag_trim_active() && app.cmd.options.is_none() && app.cmd.buffer.is_empty();
+    if drag_trimming
+        && inside
+        && !middle_down
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin()).filter(|o| rect.contains(*o))
+    {
+        app.canvas.drag_trim = Some(vec![xf.to_world(origin)]);
+    }
+    if let (Some(path), Some(pos)) = (app.canvas.drag_trim.as_mut(), hover_pos) {
+        drag_path_push(path, xf.to_world(pos), 2.0 / scale.max(1e-12));
+    }
+    let mut drag_path_done: Option<Vec<Vec2>> = None;
+    if app.canvas.drag_trim.is_some()
+        && resp.drag_stopped_by(egui::PointerButton::Primary)
+        && let Some(path) = app.canvas.drag_trim.take()
+        && drag_path_is_drag(&path, scale, 8.0)
+    {
+        drag_path_done = Some(path);
+    }
+    if let Some(path) = &drag_path_done
+        && let Err(e) = app.session.input(Input::DragPath(path.clone()))
+    {
+        app.session.echo(e.to_string());
+    }
+    if point_prompt && inside && pressed_primary && !middle_down && app.cmd.options.is_none() && app.cmd.buffer.is_empty() && drag_path_done.is_none()
+    {
         let releases: Vec<egui::Pos2> = ui.input(|i| {
             i.events
                 .iter()
@@ -1428,11 +1460,16 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         });
         // The last one is placed below, at the cursor, like any click.
         if let Some((_, earlier)) = releases.split_last() {
+            let shift = ui.input(|i| i.modifiers.shift);
             for pos in earlier.iter().filter(|p| rect.contains(**p)) {
                 let w = effective_point(app, xf.to_world(*pos), &xf, ui.ctx());
-                let result = match app.canvas.snap {
-                    Some(hit) => app.session.input_snapped(hit),
-                    None => app.session.input(Input::Point(w)),
+                let result = if shift {
+                    app.session.input(Input::PointShift(w))
+                } else {
+                    match app.canvas.snap {
+                        Some(hit) => app.session.input_snapped(hit),
+                        None => app.session.input(Input::Point(w)),
+                    }
                 };
                 if let Err(e) = result {
                     app.session.echo(e.to_string());
@@ -1499,7 +1536,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.pending_window = None;
         app.canvas.drag_window = false;
     }
-    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
+    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl && drag_path_done.is_none();
     // Clicks.
     if inside
         && pressed_primary
@@ -1518,9 +1555,15 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
                 app.cmd.buffer.clear();
             }
             // Preserve a snap's viewport origin for DIST, and its deferred curve where needed.
-            let result = match app.canvas.snap {
-                Some(hit) => app.session.input_snapped(hit),
-                None => app.session.input(Input::Point(p)),
+            // Shift held flips the pick for commands that advertise it (TRIM/EXTEND);
+            // the point itself is the snap-adjusted cursor either way.
+            let result = if mods.shift {
+                app.session.input(Input::PointShift(p))
+            } else {
+                match app.canvas.snap {
+                    Some(hit) => app.session.input_snapped(hit),
+                    None => app.session.input(Input::Point(p)),
+                }
             };
             if let Err(e) = result {
                 app.session.echo(e.to_string());
@@ -1538,6 +1581,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     // and letting go closes it. Drags on grips and drags while drawing are left alone.
     if resp.drag_started_by(egui::PointerButton::Primary)
         && !middle_down
+        && app.canvas.drag_trim.is_none()
         && app.session.pending_window.is_none()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         && rect.contains(origin)
@@ -1844,6 +1888,13 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         } else {
             painter.rect_stroke(r, 0.0, st, egui::StrokeKind::Middle);
         }
+    }
+    // The freehand trim path being dragged.
+    if let Some(path) = &app.canvas.drag_trim
+        && path.len() > 1
+    {
+        let pts: Vec<Pos2> = path.iter().map(|p| xf.to_screen(*p)).collect();
+        painter.add(Shape::line(pts, Stroke::new(1.5, t.accent)));
     }
     // Acquired tracking points and the polar / tracking paths under the cursor.
     if app.canvas.cursor.is_some() {
@@ -2333,6 +2384,20 @@ fn override_cursor(app: &mut CadApp, raw: Vec2, xf: &Xf) {
     app.canvas.cursor = Some(p);
     app.session.cursor = p;
     app.session.cursor_deferred = app.canvas.snap.and_then(|h| h.deferred);
+}
+
+/// Append `p` to a freehand drag path when it moved at least `min_step` world units from
+/// the last point: a slow drag must not flood the fence with near-duplicates.
+fn drag_path_push(path: &mut Vec<Vec2>, p: Vec2, min_step: f64) {
+    if path.last().is_none_or(|l| l.dist(p) >= min_step) {
+        path.push(p);
+    }
+}
+
+/// Whether a collected drag path counts as a drag rather than a click: its on-screen
+/// length (world length × `scale` pixels per unit) reaches `min_px`.
+fn drag_path_is_drag(path: &[Vec2], scale: f64, min_px: f64) -> bool {
+    path.windows(2).filter_map(|w| Some(w.first()?.dist(*w.get(1)?))).sum::<f64>() * scale >= min_px
 }
 
 fn pickbox_half(pickbox: f64) -> Option<f32> {
@@ -3028,5 +3093,77 @@ mod hatch_pick_tests {
         assert_eq!(app.hatch_dlg.as_ref().map(|s| s.edit.iter().map(|h| h.hex()).collect::<Vec<_>>()), Some(vec![hx]));
         // The double-click (at the hatch's centre grip) only opens the dialog: no grip edit.
         assert!(app.session.running.is_none(), "{:?}", app.session.running.as_ref().map(|r| r.machine.name()));
+    }
+}
+
+#[cfg(test)]
+mod drag_trim_tests {
+    use cadcraft_engine::Session;
+    use cadcraft_engine::doc::EntityKind;
+    use cadcraft_geom::Vec2;
+    use serde_json::json;
+
+    use crate::{CadApp, Services};
+
+    #[test]
+    fn drag_path_helpers_dedupe_and_measure() {
+        let mut path = vec![Vec2::new(0.0, 0.0)];
+        super::drag_path_push(&mut path, Vec2::new(0.1, 0.0), 0.5);
+        assert_eq!(path.len(), 1, "a step under the minimum is dropped");
+        super::drag_path_push(&mut path, Vec2::new(1.0, 0.0), 0.5);
+        assert_eq!(path.len(), 2);
+        // 1 world unit at 10 px/unit is a 10 px drag; at 1 px/unit it is a click.
+        assert!(super::drag_path_is_drag(&path, 10.0, 8.0));
+        assert!(!super::drag_path_is_drag(&path, 1.0, 8.0));
+        assert!(!super::drag_path_is_drag(&[Vec2::new(0.0, 0.0)], 10.0, 8.0));
+    }
+
+    fn segs(app: &CadApp) -> Vec<((i64, i64), (i64, i64))> {
+        let d = app.session.doc().unwrap();
+        let mut v: Vec<((i64, i64), (i64, i64))> = d
+            .model
+            .iter()
+            .filter_map(|e| if let EntityKind::Line(l) = &e.kind { Some(((l.a.x as i64, l.a.y as i64), (l.b.x as i64, l.b.y as i64))) } else { None })
+            .map(|(a, b)| if a <= b { (a, b) } else { (b, a) })
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn dragging_across_lines_in_trim_trims_them() {
+        let mut app = CadApp::new(Session::new(), Services::default());
+        for pts in [[[0.0, -5.0], [0.0, 5.0]], [[10.0, -5.0], [10.0, 5.0]], [[-5.0, 0.0], [15.0, 0.0]], [[-5.0, 2.0], [15.0, 2.0]]] {
+            app.session.execute("line", &json!({ "points": pts })).unwrap();
+        }
+        let _ = app.session.zoom_extents();
+        app.session.cmdline("trim").unwrap();
+        assert!(app.session.drag_trim_active());
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
+        let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
+            app.logic(&ctx);
+            let input = egui::RawInput { screen_rect: screen, events, time: Some(time), ..Default::default() };
+            let mut out = ctx.run_ui(input, |ui| app.ui(ui));
+            out.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new(), 0.0);
+        let xf = app.canvas.xf.unwrap();
+        let (a, m, b) = (xf.to_screen(Vec2::new(5.0, -1.0)), xf.to_screen(Vec2::new(5.0, 1.0)), xf.to_screen(Vec2::new(5.0, 3.0)));
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::default() };
+        frame(&mut app, vec![egui::Event::PointerMoved(a), button(a, true)], 0.1);
+        frame(&mut app, vec![egui::Event::PointerMoved(m)], 0.2);
+        frame(&mut app, vec![egui::Event::PointerMoved(b), button(b, false)], 0.3);
+        frame(&mut app, Vec::new(), 0.4);
+        // The stroke crossed both horizontals between the two vertical edges: each is
+        // trimmed there, and TRIM is still running for the next pick.
+        assert!(app.session.running.is_some(), "trim ended early: {}", app.session.prompt_text());
+        assert_eq!(
+            segs(&app),
+            vec![((-5, 0), (0, 0)), ((-5, 2), (0, 2)), ((0, -5), (0, 5)), ((10, -5), (10, 5)), ((10, 0), (15, 0)), ((10, 2), (15, 2)),]
+        );
+        app.session.input(cadcraft_engine::Input::Enter).unwrap();
+        assert!(app.session.running.is_none());
     }
 }
