@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-23
+
+### Fixed
+
+- OLE table text smeared into an overlapping blob: EMF `LOGFONT`
+  height is an em height, but glyph shaping sized text by cap
+  height, inflating every glyph by ~1/0.65 while the recorded
+  per-character advances (one em for full-width characters) stayed
+  put — glyphs ~300 units wide were squeezed into 195-unit
+  advances on 270-unit line pitch, overlapping in both axes. EMF
+  text is now shaped at the em-to-cap converted height with the
+  recorded advances unchanged, so embedded Excel tables lay out in
+  aligned rows and columns again. TRIM/EXTEND's advertised
+  Shift-pick was also dead — the input layer never carried the
+  Shift modifier, so Shift-clicking behaved exactly like a plain
+  click and extending from TRIM never triggered; Shift-pick now
+  flips the operation for that pick (extend in TRIM, trim in
+  EXTEND).
+- Picking was inaccurate where text sits on top of lines: TEXT and
+  MTEXT pick distance was measured against the whole text frame,
+  so any point inside the frame counted as distance 0 and text
+  always won over the line beneath it. Text is now measured
+  against its shaped glyph ink — a point on a line selects the
+  line, a point on a glyph selects the text. AutoCAD quick-mode
+  freehand drag trim is implemented as well: in TRIM/EXTEND,
+  press-dragging paints a path and every segment the path crosses
+  is trimmed/extended to the nearest intersection in one undo
+  step (outside TRIM/EXTEND, dragging still window-selects).
+- AutoCAD parity audit (all 434 registered commands exercised by
+  typed name, JSON `{}` and JSON `null`): commands whose JSON form
+  has required parameters died with "invalid parameters" when
+  typed, FIND included. FIND is now an AutoCAD-style Find &
+  Replace dialog (find / replace / replace all, match case, whole
+  word, find-next locates and zooms, result counts), and 20 more
+  commands gained typed prompt flows (LEADER, BREAKATPOINT,
+  LAYMCH, COLOR, LWEIGHT, LTSCALE, LIMITS, STYLE, DIMSTYLE,
+  MEASUREGEOM, WBLOCK, DATALINK, ovimap.georef/push/pull, and
+  others). DIST/AREA's advertised Arc option — previously "not
+  available yet" — is implemented (three-point arc; arc length
+  and segment area verified numerically). The ovimap import/export
+  menu entries now open file pickers instead of erroring. The
+  audit report (`docs/parity-audit-2026-10-22.md`) classifies the
+  remaining typed-name errors (contextual, internal subcommands,
+  honestly unimplemented 3D) instead of leaving them silent.
+
 ## [0.10.3] - 2026-10-22
 
 ### Fixed
