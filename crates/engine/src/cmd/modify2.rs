@@ -2200,6 +2200,10 @@ struct TextEditM {
     /// The picked MTEXT, when the pick is one: the in-place editor ([`Interactive::editing_mtext`])
     /// shows at its box while TEXTEDIT asks for the text, instead of the command-line prompt.
     mtext: Option<cadcraft_doc::MText>,
+    /// The picked TEXT, when the pick is one: the in-place editor ([`Interactive::editing_text`])
+    /// shows at its insertion point, so a double-click on a TEXT opens the editor exactly
+    /// like an MTEXT does instead of dropping to the command-line prompt.
+    text: Option<cadcraft_doc::Text>,
     /// Edits made in this run, newest last: each object as it was before (the Undo option).
     edits: Vec<(Handle, EntityKind)>,
     /// Single mode: end after one edit (the Mode option; Multiple by default).
@@ -2216,6 +2220,11 @@ impl Interactive for TextEditM {
     /// opens on it (a double-click on MTEXT lands here).
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         self.mtext.clone()
+    }
+    /// The picked TEXT, while TEXTEDIT waits for its text: the UI's in-place editor
+    /// opens on it (a double-click on TEXT lands here).
+    fn editing_text(&self) -> Option<cadcraft_doc::Text> {
+        self.text.clone()
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         if self.mode {
@@ -2244,6 +2253,7 @@ impl Interactive for TextEditM {
                 let kind = curves::entity(s, h)?.kind;
                 let old = text_of(&kind).ok_or_else(|| other("Select a text, mtext, attribute definition or dimension."))?;
                 self.mtext = if let EntityKind::MText(t) = &kind { Some(t.clone()) } else { None };
+                self.text = if let EntityKind::Text(t) = &kind { Some(t.clone()) } else { None };
                 self.h = Some((h, old));
                 Ok(Step::Continue)
             }
@@ -2254,11 +2264,13 @@ impl Interactive for TextEditM {
                 self.edits.push((h, before));
                 self.h = None;
                 self.mtext = None;
+                self.text = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (Some(_), Input::Enter) => {
                 self.h = None;
                 self.mtext = None;
+                self.text = None;
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (None, Input::Enter) => Ok(Step::Done),

@@ -403,10 +403,15 @@ impl Db {
             }
             i += 1;
         }
-        if self.fallback.by_char.len() >= MAX_CACHED_CHARS {
-            self.fallback.by_char.clear();
+        // Only a found face is cached: a miss may just mean the bounded search
+        // has not reached the covering face yet, and caching it would keep the
+        // character a missing glyph for the whole session.
+        if found.is_some() {
+            if self.fallback.by_char.len() >= MAX_CACHED_CHARS {
+                self.fallback.by_char.clear();
+            }
+            self.fallback.by_char.insert(c, found);
         }
-        self.fallback.by_char.insert(c, found);
         found
     }
 }
@@ -523,7 +528,44 @@ const FONT_ALIASES: &[(&str, &[&str])] = &[
     ("simfang", &["stfangsong", "fangsong", "songti sc", "simsun"]),
     ("仿宋", &["stfangsong", "fangsong", "songti sc", "simsun"]),
     ("stfangsong", &["simfang", "fangsong", "songti sc", "simsun"]),
+    ("stsong", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("华文宋体", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("stzhongsong", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("华文中宋", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("新宋体", &["simsun", "nsimsun", "songti sc", "stsongti", "noto serif cjk sc", "source han serif sc"]),
+    ("隶书", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("华文隶书", &["songti sc", "stsongti", "songti", "simsun", "noto serif cjk sc", "source han serif sc"]),
+    ("微软雅黑", &["pingfang sc", "microsoft yahei", "msyh", "noto sans cjk sc", "source han sans sc"]),
+    ("microsoft yahei", &["pingfang sc", "msyh", "微软雅黑", "noto sans cjk sc", "source han sans sc"]),
+    ("msyh", &["microsoft yahei", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("等线", &["pingfang sc", "dengxian", "noto sans cjk sc", "source han sans sc", "microsoft yahei"]),
+    ("dengxian", &["pingfang sc", "等线", "noto sans cjk sc", "source han sans sc"]),
+    ("华文黑体", &["heiti sc", "stheiti", "simhei", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("幼圆", &["pingfang sc", "youyuan", "noto sans cjk sc", "source han sans sc"]),
+    ("youyuan", &["幼圆", "pingfang sc", "noto sans cjk sc", "source han sans sc"]),
+    ("华文楷体", &["kaiti sc", "stkaiti", "kaiti", "simkai", "noto serif cjk sc", "source han serif sc"]),
+    ("楷体_gb2312", &["simkai", "kaiti sc", "stkaiti", "kaiti", "noto serif cjk sc", "source han serif sc"]),
+    ("华文仿宋", &["stfangsong", "fangsong", "simfang", "songti sc", "simsun"]),
+    ("仿宋_gb2312", &["simfang", "stfangsong", "fangsong", "songti sc", "simsun"]),
 ];
+
+/// File stems of the stroke fonts of Chinese CAD drawings. Those drawings set
+/// Latin and CJK in the same SHX face; the unified Song face (see
+/// [`song_face`]) keeps both scripts in one filled family instead of hairline
+/// strokes next to filled TTF text. Latin SHX names (`txt`, `simplex`,
+/// `romans`) are not here: they keep the built-in stroke font.
+const CJK_SHX_STEMS: &[&str] = &["hztxt", "gbcbig", "hzfs", "hzkt", "hzst", "hzsong", "tssdchn", "gbhzfs", "gbfts", "stzhongsong"];
+
+/// Whether `c` is a CJK ideograph (the common and extension-A blocks).
+fn is_cjk(c: char) -> bool {
+    ('\u{3400}'..='\u{4DBF}').contains(&c) || ('\u{4E00}'..='\u{9FFF}').contains(&c)
+}
+
+/// Whether `stem` (a `key()`-normalised name without any ".shx") is one of the
+/// Chinese SHX stroke fonts ([`CJK_SHX_STEMS`]).
+pub(crate) fn is_cjk_shx(stem: &str) -> bool {
+    CJK_SHX_STEMS.contains(&stem)
+}
 
 /// Installed-equivalent names for `k` (a `key()`-normalised name), if it is a
 /// well-known name with equivalents. Single-level: candidates are looked up
@@ -532,32 +574,63 @@ fn alias_keys(k: &str) -> &'static [&'static str] {
     FONT_ALIASES.iter().find(|(n, _)| *n == k).map(|(_, c)| *c).unwrap_or(&[])
 }
 
-/// A face of an installed (or registered) font by file name or family name. Stroke-font names
-/// (".shx", empty) return `None`.
-pub fn find(name: &str) -> Option<Face> {
-    let k = key(name);
-    if is_stroke_name(&k) {
-        return None;
+/// One name lookup with the resolved-name cache (found or not) applied.
+fn lookup_cached(g: &mut Db, cand: &str) -> Option<Face> {
+    if let Some(r) = g.resolved.get(cand) {
+        return r.clone();
     }
-    let mut g = lock();
-    let aliases = alias_keys(&k);
-    for cand in std::iter::once(k).chain(aliases.iter().map(|s| s.to_string())) {
-        if let Some(r) = g.resolved.get(&cand) {
-            if r.is_some() {
-                return r.clone();
-            }
-            continue;
-        }
-        let r = g.lookup(&cand);
-        if g.resolved.len() >= MAX_CACHED_NAMES {
-            g.resolved.clear();
-        }
-        g.resolved.insert(cand, r.clone());
-        if r.is_some() {
-            return r;
+    let r = g.lookup(cand);
+    if g.resolved.len() >= MAX_CACHED_NAMES {
+        g.resolved.clear();
+    }
+    g.resolved.insert(cand.to_string(), r.clone());
+    r
+}
+
+/// The unified Song face: the first installed equivalent of SimSun (Songti SC
+/// on macOS, Noto Serif CJK elsewhere, SimSun itself on Windows).
+fn song_face(g: &mut Db) -> Option<Face> {
+    for cand in std::iter::once("simsun").chain(alias_keys("simsun").iter().copied()) {
+        if let Some(f) = lookup_cached(g, cand) {
+            return Some(f);
         }
     }
     None
+}
+
+/// A face of an installed (or registered) font by file name or family name. Stroke-font names
+/// (".shx", empty) return `None` — except the Chinese SHX fonts ([`CJK_SHX_STEMS`]) and,
+/// when the named font is missing, any name written in Chinese: both resolve to the unified
+/// Song face, so a Chinese drawing's text is one filled family on every machine.
+pub fn find(name: &str) -> Option<Face> {
+    let k = key(name);
+    let mut g = lock();
+    let stem = k.strip_suffix(".shx").unwrap_or(&k);
+    if CJK_SHX_STEMS.contains(&stem) {
+        return song_face(&mut g);
+    }
+    if is_stroke_name(&k) {
+        return None;
+    }
+    let aliases = alias_keys(&k);
+    for cand in std::iter::once(k.clone()).chain(aliases.iter().map(|s| s.to_string())) {
+        if let Some(f) = lookup_cached(&mut g, &cand) {
+            return Some(f);
+        }
+    }
+    if k.chars().any(is_cjk) {
+        return song_face(&mut g);
+    }
+    None
+}
+
+/// Resolve the unified families once, synchronously: the system scan and the
+/// first face loads happen now (at app startup), not inside the first
+/// display-list build, so the first frame already shows final glyphs.
+pub fn warm_up() {
+    let _ = find("simsun");
+    let _ = find("simhei");
+    let _ = fallback_for('\u{6587}');
 }
 
 struct Prefs {
@@ -959,6 +1032,67 @@ mod family_tests {
         assert!(sh.strokes.is_empty(), "no stroke-font hairlines for ASCII");
         let stroke = crate::shape_stroke("GYTS-6B1", 1.0, 1.0, 0.0);
         assert!(!stroke.strokes.is_empty() && stroke.glyphs.is_empty(), "stroke font is the old broken path");
+    }
+
+    #[test]
+    fn alias_table_covers_office_and_st_font_names() {
+        assert!(alias_keys("微软雅黑").contains(&"pingfang sc"));
+        assert!(alias_keys("microsoft yahei").contains(&"pingfang sc"));
+        assert!(alias_keys("等线").contains(&"pingfang sc"));
+        assert!(alias_keys("dengxian").contains(&"pingfang sc"));
+        assert!(alias_keys("华文宋体").contains(&"songti sc"));
+        assert!(alias_keys("华文中宋").contains(&"songti sc"));
+        assert!(alias_keys("新宋体").contains(&"simsun"));
+        assert!(alias_keys("华文楷体").contains(&"kaiti sc"));
+        assert!(alias_keys("楷体_gb2312").contains(&"kaiti sc"));
+        assert!(alias_keys("华文仿宋").contains(&"stfangsong"));
+        assert!(alias_keys("仿宋_gb2312").contains(&"stfangsong"));
+        assert!(alias_keys("华文黑体").contains(&"heiti sc"));
+    }
+
+    /// Chinese SHX stroke fonts and unknown Chinese font names resolve to the
+    /// unified Song face (filled outlines), while Latin SHX names keep the
+    /// stroke font.
+    #[test]
+    fn chinese_shx_and_unknown_chinese_names_resolve_to_song() {
+        let Ok(regular) = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") else { return };
+        crate::ttf::register("Songti SC", regular.clone());
+        for name in ["hztxt.shx", "gbcbig.shx", "HZFS.SHX", "某不知名字体", "方正小标宋"] {
+            let face = crate::ttf::find(name).unwrap_or_else(|| panic!("{name} should resolve to the Song face"));
+            assert_eq!(face.bytes.as_slice(), regular.as_slice(), "{name}");
+            assert!(crate::TextFont::resolve(name).is_outline(), "{name} must be an outline font");
+        }
+        assert!(crate::ttf::find("txt.shx").is_none(), "Latin SHX keeps the stroke font");
+        assert!(crate::ttf::find("simplex.shx").is_none());
+        crate::ttf::warm_up();
+    }
+
+    /// A style pairing a Latin stroke font with a Chinese big font (the sample
+    /// drawing's `Standard` = txt + gbcbig.shx, `HZ` = TXT + HZTXT) resolves to
+    /// the unified Song face; without a Chinese big font the stroke font stays.
+    #[test]
+    fn chinese_bigfont_styles_resolve_to_song() {
+        let Ok(regular) = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") else { return };
+        crate::ttf::register("Songti SC", regular.clone());
+        assert!(crate::TextFont::resolve_styled("txt", "gbcbig.shx").is_outline());
+        assert!(crate::TextFont::resolve_styled("TXT", "HZTXT").is_outline());
+        assert!(crate::TextFont::resolve_styled("hztxt.shx", "").is_outline());
+        assert!(!crate::TextFont::resolve_styled("txt", "").is_outline(), "no Chinese big font: stroke stays");
+        assert!(!crate::TextFont::resolve_styled("romans.shx", "").is_outline());
+    }
+
+    /// A fallback miss is not cached: the character is searched again next time
+    /// (a font registered or installed later can still cover it), and a cached
+    /// entry is always a found face.
+    #[test]
+    fn fallback_miss_is_not_cached() {
+        // U+FFF0 (a "specials" code point) is in no installed font: a certain miss.
+        let c = '\u{FFF0}';
+        assert!(crate::ttf::fallback_for(c).is_none());
+        assert!(crate::ttf::fallback_for(c).is_none(), "a miss stays a miss, without poisoning the cache");
+        let g = lock();
+        assert!(!g.fallback.by_char.contains_key(&c), "the miss must not be cached");
+        assert!(g.fallback.by_char.values().all(Option::is_some), "cached entries are found faces only");
     }
 
     #[test]

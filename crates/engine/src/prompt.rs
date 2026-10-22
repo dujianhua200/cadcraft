@@ -220,6 +220,12 @@ pub trait Interactive: Send {
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         None
     }
+    /// The single-line text being edited (TEXTEDIT on a TEXT): the UI places its in-place
+    /// editor on it, exactly as for [`Interactive::editing_mtext`], so a double-click on a
+    /// TEXT never drops to the command-line prompt.
+    fn editing_text(&self) -> Option<cadcraft_doc::Text> {
+        None
+    }
 }
 
 /// See [`Interactive::drag`].

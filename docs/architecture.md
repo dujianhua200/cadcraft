@@ -61,6 +61,51 @@ batches (`gpu.rs`). Tessellation tolerance follows the view. The R-tree (`spatia
 per changed store chunk after an edit, so picking stays near 0.001 ms at 200k entities. PNG, PDF,
 SVG and plot preview reuse the same display list through the CPU rasteriser or vector writers.
 
+## Text and fonts
+
+A drawing's text must read the same on every machine, so font resolution is one ordered
+pipeline (`crates/fonts`), shared by canvas text, dimensions, plots and OLE previews:
+
+1. **Exact name.** The style's font name (file stem or family) is looked up among installed
+   fonts; an installed font always wins over every rule below.
+2. **Known equivalents.** Well-known names travel: `FONT_ALIASES` maps the Chinese font
+   families to their installed equivalents on each platform — the Song family （宋体 /
+   SimSun / 华文宋体 / 新宋体 …) resolves to Songti SC on macOS, SimSun on Windows, Noto
+   Serif CJK elsewhere; Hei, Kai and FangSong families likewise. A name written in Chinese
+   that is not in the table still lands on the Song family rather than the stroke font.
+3. **Chinese SHX fonts.** The stroke fonts of Chinese CAD drawings (`hztxt.shx`,
+   `gbcbig.shx`, `hzfs.shx`, …) resolve to the Song family: those drawings set Latin and
+   CJK in the same stroke face, and the unified Song face keeps them in one family.
+   Latin SHX names (`txt`, `simplex`, `romans`) keep the built-in stroke font. A text
+   *style* pairing a Latin stroke font with a Chinese big font (`txt` + `gbcbig.shx`,
+   `TXT` + `HZTXT`) resolves to the Song family as a whole (`TextFont::resolve_styled`).
+4. **FONTALT, then per-character fallback.** A still-missing name uses FONTALT; a character
+   the resolved face lacks comes from FONTFALLBACK, then the ranked installed fonts
+   (wide-coverage CJK faces first). Only when nothing outline resolves does text fall back
+   to the built-in stroke font.
+
+**OLE EMF text.** An OLE2FRAME preview's `EXTTEXTOUT` records resolve their LOGFONT face
+through the same pipeline (Excel's 宋体 / 等线 names land on the unified Song family, so
+preview text is filled, never stroke outlines). Per-character Dx advances are honoured:
+each glyph is placed at its cumulative Dx offset with the resolved face. The preview maps
+onto its frame by its ink bounds when the metafile header bounds carry empty margins, so
+content fills the frame it belongs to; and when a preview draws, the frame's placeholder
+diagonals are not emitted (the border stays) — the X belongs to the no-preview placeholder.
+
+**Double-click editing.** A canvas double-click starts TEXTEDIT with the object picked.
+The running TEXTEDIT exposes the picked object — `editing_mtext` or `editing_text` — and
+the UI opens the matching in-place editor on the canvas; the command line's "Enter new
+text" prompt remains only for objects with no in-place editor (attribute definitions;
+a dimension's double-click opens its Properties panel instead). Text on a locked layer
+or inside a block reference answers with an echo naming the blocker, never silence.
+
+**Font loading timing.** Resolution is lazy, but the app warms it up synchronously at
+startup (`cadcraft_fonts::warm_up`: the system scan plus one resolve of the unified
+families) before the first display-list build, so the first frame already shows final
+glyphs. A missing-glyph search that finds nothing is not cached: a character that missed
+during an early, still-bounded search is retried on the next build instead of staying a
+missing glyph for the whole session.
+
 ## Files
 
 DXF is the native path: `dxf` parses tags, `io::dxf_read` maps them to the document, and
@@ -91,4 +136,5 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-21 | minor | Text and fonts section: unified Song resolution order, OLE EMF text path, double-click in-place editing dispatch, font warm-up timing |
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |

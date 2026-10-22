@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 cadcraft-engine = { workspace = true }
+cadcraft-fonts = { workspace = true }
 cadcraft-io = { workspace = true }
 cadcraft-mcp = { workspace = true }
 cadcraft-render = { workspace = true }
