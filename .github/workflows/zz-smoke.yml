@@ -1,0 +1,4 @@
+name: Smoke
+on: push
+jobs:/n  hi:/n    runs-on: ubuntu-latest
+    steps:/n      - run: echo hi
