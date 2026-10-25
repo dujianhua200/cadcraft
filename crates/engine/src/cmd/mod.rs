@@ -7,6 +7,7 @@ mod array;
 mod audit;
 pub(crate) mod blocks;
 pub mod clipboard;
+pub mod compat;
 pub mod constraints;
 mod draw;
 mod draw2;
@@ -206,6 +207,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(lisp::specs());
         v.extend(gis::specs());
         v.extend(tilemap::specs());
+        v.extend(compat::specs());
         v
     })
 }
@@ -216,7 +218,8 @@ pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
 }
 
 /// Resolve a typed name or alias (AutoCAD-style short names such as `L`, `C`, `PL`) to an id.
-/// Command names win; the user's aliases (ALIASEDIT, REINIT) come before the built-in ones.
+/// Command names win; the user's aliases (ALIASEDIT, REINIT) come before the built-in ones, and
+/// those come before the AutoCAD 2021 defaults in [`compat::AUTOCAD_2021_ALIASES`].
 pub fn resolve_alias(name: &str) -> String {
     let l = name.to_ascii_lowercase();
     if find_command(&l).is_some() {
@@ -225,7 +228,10 @@ pub fn resolve_alias(name: &str) -> String {
     if let Some(id) = file::user_alias(&l) {
         return id;
     }
-    command_specs().iter().find(|c| c.aliases.iter().any(|a| a.eq_ignore_ascii_case(&l))).map(|c| c.id.to_string()).unwrap_or(l)
+    if let Some(id) = command_specs().iter().find(|c| c.aliases.iter().any(|a| a.eq_ignore_ascii_case(&l))).map(|c| c.id.to_string()) {
+        return id;
+    }
+    compat::alias(&l).map(str::to_string).unwrap_or(l)
 }
 
 // ---------- param helpers ----------

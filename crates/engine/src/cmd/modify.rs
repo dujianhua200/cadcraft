@@ -129,15 +129,30 @@ pub(crate) fn transform_entities(s: &mut Session, hs: &[Handle], m: &Mat3, copy:
 }
 
 fn erase(s: &mut Session, hs: &[Handle]) -> Result<usize> {
-    let d = s.doc_mut()?;
     let mut n = 0;
-    for h in hs {
-        let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
-        if !locked && d.remove_entity(*h).is_some() {
-            n += 1;
+    let mut gone: Vec<(cadcraft_doc::Space, cadcraft_doc::Entity)> = Vec::new();
+    {
+        let d = s.doc_mut()?;
+        for h in hs {
+            let locked = d.entity(*h).and_then(|e| d.layer(&e.common.layer)).is_some_and(|l| l.locked);
+            if locked {
+                continue;
+            }
+            let space = d.space_of(*h);
+            if let Some(e) = d.remove_entity(*h) {
+                n += 1;
+                if let Some(sp) = space {
+                    // OOPS puts these back (compat::run_oops).
+                    gone.push((sp, (*e).clone()));
+                }
+            }
         }
     }
     s.set_selection(Vec::new());
+    // OOPS keeps the last non-empty erasure: erasing nothing does not forget it.
+    if !gone.is_empty() {
+        s.record_deleted(gone);
+    }
     Ok(n)
 }
 

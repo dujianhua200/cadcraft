@@ -1,0 +1,73 @@
+name: Compat CI
+
+# Builds and tests the drafting core on every push to a work branch (`feat/**`) and on pull
+# requests, then prints the AutoCAD 2021 parity report this branch adds (COMPAT).
+#
+# Deliberately narrower than `cargo xtask ci`: that one runs fmt + workspace clippy with
+# `-D warnings` + the GUI/wasm targets, which are red on main today. This workflow is the gate
+# for the compatibility work, so it must be green or the work is not done: the engine, document,
+# DXF and geometry crates build and pass their tests on all three desktop platforms.
+
+on:
+  push:
+    branches: ["feat/**", "main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: compat-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the drafting core
+        run: cargo build -p cadcraft-cli -p cadcraft-engine -p cadcraft-doc -p cadcraft-dxf
+
+      - name: Unit tests
+        run: cargo test -p cadcraft-engine -p cadcraft-doc -p cadcraft-dxf -p cadcraft-geom
+
+      - name: AutoCAD 2021 parity report
+        run: cargo run -q -p cadcraft-cli -- run --sample --cmd "compat {\"detail\":true}"
+        shell: bash
+
+  report:
+    name: parity summary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Write the report into the job summary
+        shell: bash
+        run: |
+          cargo run -q -p cadcraft-cli -- run --sample --cmd "compat {}" > compat.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open("compat.json"))
+          print("## AutoCAD 2021 compatibility\n")
+          print(f"- Commands: **{d['implemented']} / {d['reference']}** ({d['percent']}%)")
+          print(f"- Default aliases: **{d['aliases']['mapped']} / {d['aliases']['reference']}**\n")
+          print("| Area | Implemented | Total |")
+          print("|---|---:|---:|")
+          for a in d["byArea"]:
+              print(f"| {a['area']} | {a['implemented']} | {a['commands']} |")
+          PY
