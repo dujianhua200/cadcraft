@@ -92,6 +92,8 @@ pub struct DclDialog {
 #[derive(Clone, Debug, Default)]
 pub struct DclFile {
     pub dialogs: Vec<DclDialog>,
+    /// What the parser had to skip (`spacer_1;` with no definition, say), for the log.
+    pub warnings: Vec<String>,
 }
 
 impl DclFile {
@@ -218,6 +220,50 @@ fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
 struct Parser {
     toks: Vec<Tok>,
     i: usize,
+    /// Prototypes defined before the dialogs that use them (`name : tile { … }` at top level),
+    /// instantiated by a bare `name;` inside a body, as AutoCAD's DCL does.
+    protos: HashMap<String, DclTile>,
+    /// What was skipped, in order.
+    warnings: Vec<String>,
+}
+
+/// A tile made of the pieces DCL needs, with the attributes given.
+fn tile(kind: &str, key: &str, label: &str, attrs: &[(&str, &str)], children: Vec<DclTile>) -> DclTile {
+    let attrs = attrs.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+    DclTile { kind: kind.to_string(), key: key.to_string(), label: label.to_string(), attrs, children }
+}
+
+/// The standard subassemblies AutoCAD's `base.dcl` defines, which dialogs everywhere reference as
+/// `ok_cancel;`, `spacer_1;` and so on. Widths are the spacing the reference stands for.
+fn standard_subassembly(name: &str) -> Option<DclTile> {
+    let n = name.to_ascii_lowercase();
+    if let Some(rest) = n.strip_prefix("spacer_")
+        && let Ok(w) = rest.parse::<u32>()
+    {
+        return Some(tile("spacer", "", "", &[("width", &w.to_string())], Vec::new()));
+    }
+    let button = |label: &str, key: &str, extra: &[(&str, &str)]| {
+        let mut attrs = vec![("key", key)];
+        attrs.extend_from_slice(extra);
+        tile("button", key, label, &attrs, Vec::new())
+    };
+    let mut children = match n.as_str() {
+        "ok_only" => vec![button("OK", "accept", &[("is_default", "true")])],
+        "ok_cancel" => vec![button("OK", "accept", &[("is_default", "true")]), button("Cancel", "cancel", &[("is_cancel", "true")])],
+        "ok_cancel_help" => {
+            vec![button("OK", "accept", &[("is_default", "true")]), button("Cancel", "cancel", &[("is_cancel", "true")]), button("Help", "help", &[])]
+        }
+        "ok_cancel_help_errtile" => {
+            vec![button("OK", "accept", &[("is_default", "true")]), button("Cancel", "cancel", &[("is_cancel", "true")]), button("Help", "help", &[])]
+        }
+        _ => return None,
+    };
+    if n.ends_with("errtile") {
+        // The error line sits under the buttons.
+        let buttons = std::mem::take(&mut children);
+        return Some(tile("column", "", "", &[], vec![tile("row", "", "", &[], buttons), tile("text", "error", "", &[], Vec::new())]));
+    }
+    Some(tile("row", "", "", &[], children))
 }
 
 impl Parser {
@@ -292,7 +338,8 @@ impl Parser {
                     children.push(self.tile()?);
                 }
                 Some(Tok::Ident(_)) => {
-                    // A lookahead: `name = value;` is an attribute, `name : type {` a tile.
+                    // A lookahead: `name = value;` is an attribute, `name : type {` a tile, and a
+                    // bare `name;` a subassembly reference (`spacer_1;`, `ok_cancel;`).
                     let save = self.i;
                     let name = self.ident()?;
                     if self.peek() == Some(&Tok::Punct('=')) {
@@ -303,6 +350,14 @@ impl Parser {
                     } else if self.peek() == Some(&Tok::Punct(':')) {
                         self.i = save;
                         children.push(self.tile()?);
+                    } else if self.peek() == Some(&Tok::Punct(';')) {
+                        self.next();
+                        // A prototype defined earlier in the file, else one of base.dcl's.
+                        let sub = self.protos.get(&name.to_ascii_lowercase()).cloned().or_else(|| standard_subassembly(&name));
+                        match sub {
+                            Some(t) => children.push(t),
+                            None => self.warnings.push(format!("对话框文件中的子装配 {name}; 未定义，已跳过")),
+                        }
                     } else {
                         return Err(format!("对话框文件在 {name} 后缺少 = 或 :"));
                     }
@@ -314,18 +369,21 @@ impl Parser {
 }
 
 /// Parse `.dcl` text: every top-level `name : dialog { … }` is a dialog definition; other
-/// top-level `name : type { … }` entries (shared tile definitions) are skipped.
+/// top-level `name : type { … }` entries are prototypes a later `name;` instantiates.
 pub fn parse_dcl(src: &str) -> Result<DclFile, String> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks, i: 0 };
+    let mut p = Parser { toks, i: 0, protos: HashMap::new(), warnings: Vec::new() };
     let mut file = DclFile::default();
     while p.peek().is_some() {
         let t = p.tile()?;
         if t.kind == "dialog" {
             let label = t.label.clone();
             file.dialogs.push(DclDialog { name: t.key.clone(), label, tiles: t.children });
+        } else if !t.key.is_empty() {
+            p.protos.insert(t.key.to_ascii_lowercase(), t);
         }
     }
+    file.warnings = p.warnings;
     Ok(file)
 }
 
@@ -367,6 +425,9 @@ pub fn load_dialog(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> 
     let path = string(&a[0])?;
     match read_dcl(ctx.s, &path).map(|t| parse_dcl(&t)) {
         Some(Ok(file)) => {
+            for w in &file.warnings {
+                ctx.s.echo(w.clone());
+            }
             let id = ctx.env.dcl_next;
             ctx.env.dcl_next = ctx.env.dcl_next.wrapping_add(1).max(1);
             ctx.env.dcl_files.insert(id, file);
@@ -702,5 +763,52 @@ impl Session {
                 Need::Yield => "a dialog action took too long".to_string(),
             }),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Real AutoCAD dialogs are built from `base.dcl`'s subassemblies: `spacer_1;` and
+    /// `ok_cancel;` are references, not attributes, and used to stop the parse with
+    /// "missing = or :".
+    #[test]
+    fn base_dcl_subassemblies_expand() {
+        let src = "auto : dialog {\n label = \"Auto\";\n : row { : edit_box { label = \"L\"; key = \"changdu\"; } }\n spacer_1;\n : row { : edit_box { key = \"bili\"; } }\n ok_cancel;\n}\n";
+        let f = parse_dcl(src).unwrap();
+        assert!(f.warnings.is_empty(), "{:?}", f.warnings);
+        let d = &f.dialogs[0];
+        assert_eq!(d.name, "auto");
+        assert_eq!(d.tiles.len(), 4, "{:?}", d.tiles.iter().map(|t| &t.kind).collect::<Vec<_>>());
+        assert_eq!(d.tiles[0].kind, "row");
+        assert_eq!(d.tiles[1].kind, "spacer");
+        assert_eq!(d.tiles[1].attrs.get("width").map(String::as_str), Some("1"));
+        // ok_cancel: a row holding OK (accept) and Cancel (cancel).
+        let cancel = &d.tiles[3];
+        assert_eq!(cancel.kind, "row");
+        let keys: Vec<&str> = cancel.children.iter().map(|c| c.key.as_str()).collect();
+        assert_eq!(keys, ["accept", "cancel"]);
+        assert_eq!(cancel.children[1].attrs.get("is_cancel").map(String::as_str), Some("true"));
+    }
+
+    /// A prototype defined before the dialog instantiates through its bare name.
+    #[test]
+    fn prototypes_instantiate_by_name() {
+        let src = "myrow : row { : edit_box { key = \"a\"; } }\nmain : dialog { label = \"M\"; myrow; }\n";
+        let f = parse_dcl(src).unwrap();
+        let d = &f.dialogs[0];
+        assert_eq!(d.tiles.len(), 1);
+        assert_eq!(d.tiles[0].kind, "row");
+        assert_eq!(d.tiles[0].children[0].key, "a");
+    }
+
+    /// An undefined reference is skipped with a warning; the rest of the dialog still loads.
+    #[test]
+    fn unknown_subassembly_is_a_warning_not_an_error() {
+        let f = parse_dcl("main : dialog { label = \"M\"; nosuch_thing; : button { key = \"b\"; } }\n").unwrap();
+        assert_eq!(f.dialogs[0].tiles.len(), 1);
+        assert_eq!(f.warnings.len(), 1);
+        assert!(f.warnings[0].contains("nosuch_thing"));
     }
 }

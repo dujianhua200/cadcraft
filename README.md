@@ -113,6 +113,7 @@ numbers):
 | Grips | Hot grips with Space to cycle Stretch, Move, Rotate, Scale and Mirror |
 | Interface languages | English, Ukrainian (Українська), Brazilian Portuguese (Português (Brasil)), German (Deutsch), Spanish (Español), Czech (Čeština), Russian (Русский), French (Français), Simplified Chinese (简体中文, with an installed CJK font), Italian (Italiano), Korean (한국어, with an installed Hangul font), Swedish (Svenska) and Arabic (العربية, with an installed Arabic font), live switching and a remembered Auto/system-language choice; [details](docs/localization.md) |
 | Automation | MCP server, JSON control channel, `cadcraft-cli` (info, convert, run, commands, mcp) |
+| AutoCAD 2021 compatibility | Every default `acad.pgp` alias AutoCAD 2021 ships, for the commands this build has, plus 244 of 299 reference commands (81.6%) — type `L`, `TR`, `RE`, `DCE`, `MO` and they work. `COMPAT` prints the measured report; a user `.pgp` file still overrides the defaults. [Details](docs/autocad-2021-compat.md) |
 
 ## Quick start
 

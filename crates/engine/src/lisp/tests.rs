@@ -711,9 +711,11 @@ fn dht_dialog_path_remaps_to_support() {
     assert_eq!(ok(&mut s, "(fill_image 0 0 32 16 -2)"), "T");
     assert_eq!(ok(&mut s, "(slide_image 0 0 32 16 \"cyh_b00001.sld\")"), "T");
     assert_eq!(ok(&mut s, "(end_image)"), "T");
-    // Without the file, the message says where the file belongs.
+    // Without the file, the message says where the file belongs. The name can't exist anywhere:
+    // `d:\autolisp\dcl\auto.dcl` does on a machine with a real AutoCAD LISP folder, and the load
+    // then succeeds.
     let mut s = session();
-    assert_eq!(ok(&mut s, "(load_dialog \"d:\\\\autolisp\\\\dcl\\\\auto.dcl\")"), "nil");
+    assert_eq!(ok(&mut s, "(load_dialog \"d:\\\\autolisp\\\\dcl\\\\__no_such_dialog__.dcl\")"), "nil");
     assert!(s.log.iter().any(|l| l.contains("找不到对话框文件") && l.contains("support")), "{:?}", s.log);
     let _ = std::fs::remove_dir_all(&dir);
 }

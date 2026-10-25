@@ -145,6 +145,8 @@ pub struct DocState {
     /// The Block Editor (BEDIT), when it is open: `doc` is then the editor's drawing, and the
     /// drawing itself waits in it ([`DocState::drawing`]).
     pub block_edit: Option<blockedit::BlockEdit>,
+    /// What the last command erased, for OOPS: the space each object came from and the object.
+    pub last_deleted: Vec<(Space, Entity)>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -171,6 +173,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             binary_dxf: false,
             block_edit: None,
+            last_deleted: Vec::new(),
         }
     }
     /// The drawing has changes not saved to its file, or the Block Editor has changes not yet
@@ -858,6 +861,33 @@ impl Session {
     pub fn pixel_size(&self) -> f64 {
         let v = self.state().map(|s| s.view()).unwrap_or_default();
         v.height / self.viewport_px.1.max(1.0)
+    }
+
+    /// Remember what a command erased, so OOPS can put it back. Each command that erases replaces
+    /// the list: OOPS restores the last command's objects, as AutoCAD's does.
+    pub fn record_deleted(&mut self, items: Vec<(Space, Entity)>) {
+        if let Ok(st) = self.state_mut() {
+            st.last_deleted = items;
+        }
+    }
+
+    /// Put back what the last command erased, with fresh handles. Returns how many came back.
+    pub fn restore_last_deleted(&mut self) -> Result<usize> {
+        let items = match self.state_mut() {
+            Ok(st) => std::mem::take(&mut st.last_deleted),
+            Err(_) => return Err(EngineError::NoDocument),
+        };
+        let mut n = 0;
+        for (space, e) in items {
+            // The old handle may belong to a newer object: `add` mints a fresh one.
+            if self.doc_mut()?.add(&space, e.common, e.kind).is_ok() {
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.touch();
+        }
+        Ok(n)
     }
 
     // ---------------- programmatic execution ----------------
