@@ -4,6 +4,7 @@
 //! added to the session on the UI thread. Cancelling stops the read: no half-built drawing is
 //! added. The web build has no threads and opens synchronously.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
@@ -16,7 +17,7 @@ use crate::theme::Tokens;
 type Outcome = Result<ReadFile, String>;
 
 struct Job {
-    path: String,
+    path: PathBuf,
     started: Instant,
     progress: Arc<OpenProgress>,
     rx: Receiver<Outcome>,
@@ -30,9 +31,9 @@ pub struct Opening {
 
 impl Opening {
     /// Start reading `path` on a worker thread.
-    pub fn start(&mut self, path: &str) {
+    pub fn start(&mut self, path: &Path) {
         let (tx, rx) = channel();
-        let p = path.to_string();
+        let p = path.to_path_buf();
         let progress = Arc::new(OpenProgress::new());
         let progress2 = progress.clone();
         let spawned = std::thread::Builder::new().name("cadcraft-open".into()).spawn(move || {
@@ -41,11 +42,11 @@ impl Opening {
         if spawned.is_err() {
             // No thread to read on: report it like any other failed open.
             let (tx, rx2) = channel();
-            let _ = tx.send(Err(format!("open: {path}: could not start a reader thread")));
-            self.jobs.push(Job { path: path.to_string(), started: Instant::now(), progress, rx: rx2 });
+            let _ = tx.send(Err(format!("open: {}: could not start a reader thread", path.display())));
+            self.jobs.push(Job { path: path.to_path_buf(), started: Instant::now(), progress, rx: rx2 });
             return;
         }
-        self.jobs.push(Job { path: path.to_string(), started: Instant::now(), progress, rx });
+        self.jobs.push(Job { path: path.to_path_buf(), started: Instant::now(), progress, rx });
     }
 
     /// Ask every in-flight read to stop. The worker returns a cancellation error, the job is
@@ -62,7 +63,7 @@ impl Opening {
     }
 
     /// The finished reads, as (path, result). A reader that died without answering is an error.
-    pub fn poll(&mut self) -> Vec<(String, Outcome)> {
+    pub fn poll(&mut self) -> Vec<(PathBuf, Outcome)> {
         let mut done = Vec::new();
         self.jobs.retain(|j| match j.rx.try_recv() {
             Ok(r) => {
@@ -71,7 +72,7 @@ impl Opening {
             }
             Err(TryRecvError::Empty) => true,
             Err(TryRecvError::Disconnected) => {
-                done.push((j.path.clone(), Err(format!("open: {}: the file could not be read", j.path))));
+                done.push((j.path.clone(), Err(format!("open: {}: the file could not be read", j.path.display()))));
                 false
             }
         });
@@ -82,7 +83,7 @@ impl Opening {
     /// are queued.
     fn label(&self) -> Option<String> {
         let first = self.jobs.first()?;
-        let name = std::path::Path::new(&first.path).file_name().map_or_else(|| first.path.clone(), |n| n.to_string_lossy().to_string());
+        let name = first.path.file_name().unwrap_or(first.path.as_os_str()).to_string_lossy();
         let secs = first.started.elapsed().as_secs_f32();
         let stage = if first.progress.is_cancelled() { "正在取消".to_string() } else { first.progress.stage().label().to_string() };
         let more = self.jobs.len() - 1;
@@ -99,9 +100,10 @@ impl Opening {
         let Some(label) = self.label() else { return };
         let t = Tokens::get();
         let mut cancel = false;
-        egui::Area::new(egui::Id::new("cc_opening")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(
-            ctx,
-            |ui| {
+        egui::Area::new(egui::Id::unique("cc_opening"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
                 egui::Frame::NONE
                     .fill(t.panel)
                     .stroke(egui::Stroke::new(1.0, t.accent))
@@ -116,8 +118,7 @@ impl Opening {
                             }
                         });
                     });
-            },
-        );
+            });
         if cancel {
             self.cancel_all();
         }
@@ -127,6 +128,7 @@ impl Opening {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     use cadcraft_engine::Session;
@@ -137,11 +139,11 @@ mod tests {
     /// cannot be read is reported like a failed OPEN without adding a drawing.
     #[test]
     fn open_path_reads_in_the_background_and_reports_failure() {
-        let mut app = CadApp::new(Session::new(), Services { pick_open: None, pick_save: None });
+        let mut app = CadApp::new(Session::new(), Services::default());
         let before = app.session.docs.len();
         let missing = std::env::temp_dir().join(format!("cadcraft-missing-{}.dxf", std::process::id()));
         let p = missing.to_string_lossy().to_string();
-        app.open_path(&p);
+        app.open_path(&missing);
         assert!(app.opening.busy() || app.status.is_some(), "the read starts in the background");
         let t = Instant::now();
         while app.opening.busy() && t.elapsed() < Duration::from_secs(10) {
@@ -160,8 +162,8 @@ mod tests {
     fn card_text_names_the_file_and_counts_queued_ones() {
         let mut o = super::Opening::default();
         assert!(o.label().is_none());
-        o.start("/nonexistent/dir/a.dxf");
-        o.start("/nonexistent/dir/b.dxf");
+        o.start(Path::new("/nonexistent/dir/a.dxf"));
+        o.start(Path::new("/nonexistent/dir/b.dxf"));
         let l = o.label().unwrap_or_default();
         assert!(l.starts_with("正在打开 a.dxf 及另外 1 个"), "{l}");
         assert!(l.contains("正在解码 DWG") || l.contains("正在解析 DXF") || l.contains("正在构建图形"), "{l}");
@@ -171,7 +173,7 @@ mod tests {
     #[test]
     fn cancel_marks_jobs_cancelled() {
         let mut o = super::Opening::default();
-        o.start("/nonexistent/dir/a.dxf");
+        o.start(Path::new("/nonexistent/dir/a.dxf"));
         assert!(!o.jobs.first().map(|j| j.progress.is_cancelled()).unwrap_or(true));
         o.cancel_all();
         assert!(o.jobs.first().map(|j| j.progress.is_cancelled()).unwrap_or(false));

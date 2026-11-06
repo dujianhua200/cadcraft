@@ -10,6 +10,12 @@ name: "Release"
 # Build matrix trimmed (dujianhua200/cadcraft): only macOS universal (dmg) and
 # Windows x64 (msi) are built; Linux/Web/FreeBSD/Flatpak jobs are deleted and
 # the Draft Release needs only [version, macos, windows].
+# Asset trim (2026-11-06): the upload-artifact steps only upload the DMG / MSI,
+# so a Release carries exactly cadcraft-<ver>-macos-universal.dmg,
+# cadcraft-<ver>-windows-x64.msi and SHA256SUMS.txt (no portable or CLI zips).
+# A `publish` dispatch input (default false) lets a manual run on the release
+# branch publish immediately; the weekly `.github/workflows/sync-upstream.yml`
+# dispatches with publish=true for automated upstream-sync releases.
 # macOS/Windows build steps no longer read any signing secret (packaging/macos/
 # package.sh falls back to ad-hoc signing, packaging/windows/sign.ps1 warns and
 # leaves files unsigned), and no `environment: release` is used. To re-sync with
@@ -27,6 +33,10 @@ on:
         description: "Version override for a test run, e.g. 0.2.0-rc.1 (empty: Cargo.toml)"
         type: string
         default: ""
+      publish:
+        description: "Publish the release after drafting it (default: leave a draft for manual review). The weekly upstream-sync workflow publishes through the API itself; this input is for manual dispatch runs on the release branch."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -108,7 +118,7 @@ jobs:
       - name: Check out craft-fonts
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
         with:
-          ref: 3d9ab3a132ed0eff457e424226a435a901da30d3
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
@@ -126,10 +136,11 @@ jobs:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
         run: packaging/macos/package.sh --arch universal
+      # Fork asset trim: only the universal DMG ships (no portable/CLI zips).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-macos
-          path: dist/release/*
+          path: dist/release/cadcraft-*-macos-universal.dmg
           if-no-files-found: error
       - name: Remove temporary keychain
         if: always()
@@ -197,7 +208,7 @@ jobs:
       - name: Check out craft-fonts
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
         with:
-          ref: 3d9ab3a132ed0eff457e424226a435a901da30d3
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: stable
@@ -221,10 +232,11 @@ jobs:
           CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
           CRAFT_FONTS_REQUIRED: "1"
         run: ./packaging/windows/package.ps1 -Arch ${{ matrix.arch }}
+      # Fork asset trim: only the x64 MSI ships (no portable/CLI zips).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-windows-${{ matrix.arch }}
-          path: dist/release/*
+          path: dist/release/cadcraft-*-windows-x64.msi
           if-no-files-found: error
 
   release:
@@ -241,3 +253,12 @@ jobs:
           app-title: CADCraft
           prerelease: ${{ needs.version.outputs.prerelease }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      # Fork addition: manual dispatch runs may publish immediately. Push-triggered
+      # runs (the normal flow, including the weekly upstream sync) leave the draft
+      # alone here; the sync workflow publishes through the API after this run ends.
+      - name: Publish the release (dispatch with publish=true)
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: gh release edit "v${VERSION}" --draft=false --repo "${{ github.repository }}"
