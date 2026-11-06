@@ -9,7 +9,8 @@ use cadcraft_engine::doc::{Drawing, EntityKind, Image, Raster};
 use serde_json::{Value, json};
 
 fn hooks() {
-    set_io(IoHooks { read_progress: None,
+    set_io(IoHooks {
+        read_progress: None,
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
         plot: None,

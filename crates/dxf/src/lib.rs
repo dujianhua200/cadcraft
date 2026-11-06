@@ -375,10 +375,6 @@ fn parse_ascii_counted(text: &str, max_tags: usize, expected: usize) -> Result<V
     parse_ascii_counted_with_progress(text, max_tags, expected, &mut |_| true)
 }
 
-fn parse_ascii_with_limit(text: &str, max_tags: usize) -> Result<Vec<Tag>> {
-    parse_ascii_with_limit_and_progress(text, max_tags, &mut |_| true)
-}
-
 /// ASCII parse with a progress callback: `on_tags` runs every 32k group codes and `false`
 /// cancels the parse. The check interval keeps the callback cheap on small files and lets a
 /// large-file open be abandoned promptly.
@@ -387,12 +383,7 @@ fn parse_ascii_with_limit_and_progress(text: &str, max_tags: usize, on_tags: &mu
 }
 
 #[allow(clippy::while_let_loop)]
-fn parse_ascii_counted_with_progress(
-    text: &str,
-    max_tags: usize,
-    expected: usize,
-    on_tags: &mut dyn FnMut(usize) -> bool,
-) -> Result<Vec<Tag>> {
+fn parse_ascii_counted_with_progress(text: &str, max_tags: usize, expected: usize, on_tags: &mut dyn FnMut(usize) -> bool) -> Result<Vec<Tag>> {
     let mut tags = Vec::new();
     tags.try_reserve_exact(expected.min(max_tags)).map_err(|_| DxfError::OutOfMemory { tags: expected })?;
     let mut lines = ascii_lines(text.strip_prefix('\u{feff}').unwrap_or(text)).enumerate();

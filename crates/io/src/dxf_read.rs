@@ -317,11 +317,8 @@ fn ole_preview_from_raw(tags: &[RawTag]) -> Option<OlePreviewKind> {
 /// so it draws, selects and reports extents instead of staying invisible.
 fn fill_ole_frames(d: &mut Drawing) {
     fn fill(store: &mut cadcraft_doc::EntityStore) {
-        let handles: Vec<Handle> = store
-            .iter()
-            .filter(|e| matches!(&e.kind, EntityKind::Unknown(u) if u.is_ole_frame() && u.ole.is_none()))
-            .map(|e| e.handle)
-            .collect();
+        let handles: Vec<Handle> =
+            store.iter().filter(|e| matches!(&e.kind, EntityKind::Unknown(u) if u.is_ole_frame() && u.ole.is_none())).map(|e| e.handle).collect();
         for h in handles {
             store.modify(h, |e| {
                 if let EntityKind::Unknown(u) = &mut e.kind {

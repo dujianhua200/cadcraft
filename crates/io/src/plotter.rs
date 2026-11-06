@@ -114,15 +114,26 @@ fn png(d: &Drawing, space: &Space, opts: &Value) -> Result<Vec<u8>> {
     if cadcraft_doc::gis::basemap_visible(d) {
         // Basemap attribution (§9.2): bottom-left of the visible area, 1% inset,
         // 1.5% type height — in list coordinates, so it plots with the drawing.
+        // A placed plot blanks everything outside the printable area afterwards
+        // (upstream's sheet placement), which would erase a corner note sitting
+        // in the margin band, so a placed plot anchors the note just inside the
+        // printable area instead (sheet point mapped through the view).
         let vis = view.world_bounds();
         if !vis.is_empty() {
-            let inset = vis.width() * 0.01;
-            let height = vis.height() * 0.015;
-            let at = Vec2::new(vis.min.x + inset, vis.min.y + inset);
+            let text_h = vis.height() * 0.015;
+            let at = if placed {
+                let q = sheet.printable.min + Vec2::new(sheet.printable.width() * 0.01, sheet.printable.height() * 0.01);
+                Vec2::new(
+                    view.center.x + (q.x * k - f64::from(width) / 2.0) / view.scale,
+                    view.center.y + (q.y * k - f64::from(height) / 2.0) / view.scale,
+                )
+            } else {
+                Vec2::new(vis.min.x + vis.width() * 0.01, vis.min.y + vis.width() * 0.01)
+            };
             let opts = cadcraft_render::Options { tolerance, ..cadcraft_render::Options::default() };
             cadcraft_render::append_list(
                 &mut list,
-                cadcraft_render::attribution::attribution_text_list(cadcraft_doc::gis::PLOT_ATTRIBUTION, at, height, &opts),
+                cadcraft_render::attribution::attribution_text_list(cadcraft_doc::gis::PLOT_ATTRIBUTION, at, text_h, &opts),
             );
         }
     }

@@ -1,4 +1,4 @@
-use super::{CadApp, Handle, Input, Vec2};
+use super::{CadApp, Handle, Vec2};
 
 /// The vertical wheel scroll this frame that zooms, in points, read from the raw wheel events so
 /// each notch zooms by its whole step at once, as in standard CAD (#660). egui's smoothed delta
@@ -25,23 +25,9 @@ pub(super) fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOption
     if points.is_finite() { points } else { 0.0 }
 }
 
-/// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
-/// Start TEXTEDIT on the text, mtext or attribute definition at `p` (the objects its shortcut menu
-/// offers Edit Text for); false when there is none.
-pub(super) fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
-    use cadcraft_engine::doc::EntityKind;
-    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
-        app.session.doc().ok()?.entity(h).map(|e| matches!(e.kind, EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_)))
-    });
-    if is_text != Some(true) {
-        return false;
-    }
-    app.start("textedit");
-    if let Err(e) = app.session.input(Input::Point(p)) {
-        app.session.echo(e.to_string());
-    }
-    true
-}
+// Fork: upstream's `edit_text_at` was here; the canvas root module carries a
+// superset (locked-layer hint + dimension double-click opens Properties) under
+// the same name, which is the one the canvas calls. Removed as a dead duplicate.
 
 /// The hatch under world point `w` within the pick aperture (PICKBOX × 1.5 pixels at `scale`
 /// pixels per unit), if any.

@@ -75,7 +75,9 @@ fn vp_motion(vp: &cadcraft_doc::Viewport, built: (Vec2, f64)) -> Option<(f64, Ve
 /// How to draw the active viewport's [`VpContent`] this frame.
 pub(super) struct VpFrame {
     /// Draws the list at the viewport's current view.
-    xf: Xf,
+    /// (Fork: `pub(super)` — the canvas root reads it to build the basemap
+    /// tile transform for the active viewport.)
+    pub(super) xf: Xf,
     /// The viewport's rectangle (a clipped one's outline bounds) on screen.
     pub(super) on_screen: Rect,
     /// A clipped viewport's outline on paper, masked with the stencil buffer.

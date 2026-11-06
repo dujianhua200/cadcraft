@@ -6,7 +6,8 @@ use cadcraft_engine::cmd::file::{IoHooks, backup_path, looks_complete, looks_lik
 use serde_json::json;
 
 fn hooks() {
-    set_io(IoHooks { read_progress: None,
+    set_io(IoHooks {
+        read_progress: None,
         read: |b, n| cadcraft_io::read(b, n).map_err(|e| e.to_string()),
         write: |d, n| cadcraft_io::write(d, n).map_err(|e| e.to_string()),
         plot: None,

@@ -232,57 +232,7 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
         // the placeholder diagonals only when no preview drew (in AutoCAD the X belongs
         // to the no-preview placeholder, never across rendered content), and a centred
         // placeholder label stands in when there is no preview.
-        EntityKind::Unknown(u) if u.is_ole_frame() => {
-            let mut ole_drew = false;
-            let ole_corners = u.ole.as_ref().filter(|o| o.is_visible()).map(|o| {
-                ole_drew = crate::emf::draw_ole_emf(b, ctx, &u.tags, o);
-                o.corners()
-            });
-            if let Some(c) = &ole_corners {
-                // Border (adjacent corners) always; diagonals only without a preview.
-                for (a, b2) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[3]), (c[3], c[0])] {
-                    b.polyline(ctx, rgb, lw, &[a, b2]);
-                }
-                if !ole_drew {
-                    for (a, b2) in [(c[0], c[2]), (c[1], c[3])] {
-                        b.polyline(ctx, rgb, lw, &[a, b2]);
-                    }
-                }
-            } else if let Some(q) = cadcraft_doc::ole_frame(&u.tags) {
-                // No parsed frame on the entity: upstream's tags-derived frame quad.
-                b.polyline(ctx, rgb, lw, &q);
-            }
-            // Placeholder label, centred in the frame, when no preview drew.
-            if b.opts.text
-                && !ole_drew
-                && let Some(o) = u.ole.as_ref().filter(|o| o.is_visible())
-            {
-                let c = o.corners();
-                let w = (c[1].x - c[0].x).abs();
-                let h = (c[0].y - c[2].y).abs();
-                let label = o.label();
-                let chars = label.chars().count().max(1) as f64;
-                // A CJK character is about one em wide; keep the label inside the frame.
-                let height = (h * 0.3).min(w / (chars * 1.05));
-                if height.is_finite() && height > 0.0 {
-                    let centre = Vec2::new((c[0].x + c[1].x) / 2.0, (c[0].y + c[2].y) / 2.0);
-                    let text = cadcraft_doc::Text {
-                        insert: centre.to3(0.0),
-                        align_pt: Some(centre.to3(0.0)),
-                        height,
-                        value: label,
-                        rotation: 0.0,
-                        width_factor: 1.0,
-                        oblique: 0.0,
-                        style: "Standard".to_string(),
-                        halign: cadcraft_doc::HAlign::Center,
-                        valign: cadcraft_doc::VAlign::Middle,
-                    };
-                    let (sh, _) = place_text_entity(ctx.d, &text, &text.value);
-                    b.shaped(ctx, rgb, lw, &sh);
-                }
-            }
-        }
+        EntityKind::Unknown(u) if u.is_ole_frame() => draw_ole_frame(b, ctx, u, rgb, lw),
         kind => {
             for prim in kind.prims() {
                 match prim {
@@ -451,4 +401,57 @@ fn table(b: &mut Builder, ctx: &Ctx, t: &cadcraft_doc::Table, rgb: Ink, lw: f32)
 fn leader_scale(d: &Drawing, st: Option<&cadcraft_doc::DimStyle>) -> f64 {
     let dimscale = d.header.f64("DIMSCALE", 1.0);
     st.map(|s| s.effective_scale(dimscale)).unwrap_or_else(|| cadcraft_doc::DimStyle::default().effective_scale(dimscale))
+}
+
+/// Draw an OLE2FRAME: see the match arm in `entity_parts` for the behaviour contract.
+fn draw_ole_frame(b: &mut Builder, ctx: &Ctx, u: &cadcraft_doc::Unknown, rgb: Ink, lw: f32) {
+    let mut ole_drew = false;
+    let ole_corners = u.ole.as_ref().filter(|o| o.is_visible()).map(|o| {
+        ole_drew = crate::emf::draw_ole_emf(b, ctx, &u.tags, o);
+        o.corners()
+    });
+    if let Some(c) = &ole_corners {
+        // Border (adjacent corners) always; diagonals only without a preview.
+        for (a, b2) in [(c[0], c[1]), (c[1], c[2]), (c[2], c[3]), (c[3], c[0])] {
+            b.polyline(ctx, rgb, lw, &[a, b2]);
+        }
+        if !ole_drew {
+            for (a, b2) in [(c[0], c[2]), (c[1], c[3])] {
+                b.polyline(ctx, rgb, lw, &[a, b2]);
+            }
+        }
+    } else if let Some(q) = cadcraft_doc::ole_frame(&u.tags) {
+        // No parsed frame on the entity: upstream's tags-derived frame quad.
+        b.polyline(ctx, rgb, lw, &q);
+    }
+    // Placeholder label, centred in the frame, when no preview drew.
+    if b.opts.text
+        && !ole_drew
+        && let Some(o) = u.ole.as_ref().filter(|o| o.is_visible())
+    {
+        let c = o.corners();
+        let w = (c[1].x - c[0].x).abs();
+        let h = (c[0].y - c[2].y).abs();
+        let label = o.label();
+        let chars = label.chars().count().max(1) as f64;
+        // A CJK character is about one em wide; keep the label inside the frame.
+        let height = (h * 0.3).min(w / (chars * 1.05));
+        if height.is_finite() && height > 0.0 {
+            let centre = Vec2::new((c[0].x + c[1].x) / 2.0, (c[0].y + c[2].y) / 2.0);
+            let text = cadcraft_doc::Text {
+                insert: centre.to3(0.0),
+                align_pt: Some(centre.to3(0.0)),
+                height,
+                value: label,
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".to_string(),
+                halign: cadcraft_doc::HAlign::Center,
+                valign: cadcraft_doc::VAlign::Middle,
+            };
+            let (sh, _) = place_text_entity(ctx.d, &text, &text.value);
+            b.shaped(ctx, rgb, lw, &sh);
+        }
+    }
 }

@@ -43,6 +43,7 @@ fn unnamed_text_inputs(h: &Harness<'_, CadApp>) -> Vec<String> {
 #[test]
 fn options_autosave_path_has_a_semantic_label() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     menus::activate(&mut app, "options");
     // The path field lives on Open and Save, not on the default Display tab.
     app.ui.dialog = Some("options:files".into());
@@ -64,6 +65,7 @@ fn options_autosave_path_has_a_semantic_label() {
 fn every_options_tab_names_its_controls() {
     for tab in ["display", "files", "drafting", "selection", "preferences", "profiles"] {
         let mut app = CadApp::new(Session::new(), Services::default());
+        app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
         menus::activate(&mut app, "options");
         app.ui.dialog = Some(format!("options:{tab}"));
         let h = harness(app);
@@ -77,6 +79,7 @@ fn every_options_tab_names_its_controls() {
 #[test]
 fn parameters_manager_fields_have_a_semantic_label() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("parameters", json!({ "name": "user1", "expr": "4" })).unwrap();
     app.run("parameters", json!({ "name": "user2", "expr": "user1*2" })).unwrap();
     app.ui.dialog = Some("parameters".into());
@@ -93,6 +96,7 @@ fn parameters_manager_fields_have_a_semantic_label() {
 #[test]
 fn accesskit_root_carries_the_interface_language() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = i18n::Preference::German;
     let h = harness(app);
     assert_eq!(h.state().language(), "de");

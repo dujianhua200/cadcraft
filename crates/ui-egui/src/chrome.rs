@@ -528,7 +528,7 @@ pub fn status_bar(app: &mut CadApp, ui: &mut egui::Ui) {
                 let gw = galley.size().x.min(width);
                 let rect = Rect::from_min_max(pos2(left, r.top()), pos2(left + width, r.bottom()));
                 p.with_clip_rect(rect).galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, t.text_dim);
-                ui.interact(rect, ui.id().with("status_tilemap"), Sense::hover()).on_hover_text(attr);
+                ui.interact(rect, ui.scope_id().with("status_tilemap"), Sense::hover()).on_hover_text(attr);
                 left += gw + 12.0;
             }
         }

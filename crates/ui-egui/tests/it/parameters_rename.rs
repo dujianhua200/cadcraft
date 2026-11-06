@@ -11,6 +11,7 @@ use serde_json::json;
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("parameters", json!({ "name": "user1", "expr": "4" })).unwrap();
     app.run("parameters", json!({ "name": "user2", "expr": "user1*2" })).unwrap();
     app.ui.dialog = Some("parameters".into());

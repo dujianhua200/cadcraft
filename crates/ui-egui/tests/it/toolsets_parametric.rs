@@ -10,6 +10,7 @@ use egui_kittest::kittest::{NodeT, Queryable};
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.ui.in_window_menu = false;
     app.integrated_titlebar = true;
     // Tall enough that the Parametric category, last in Drafting, is on screen.

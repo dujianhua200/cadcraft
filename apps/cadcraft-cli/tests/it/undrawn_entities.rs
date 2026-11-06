@@ -83,7 +83,10 @@ fn an_ole_frame_is_noted_as_frame_only() {
     assert!(out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!err.contains("entity not drawn") && !err.contains("entities not drawn"), "{err}");
-    let notes: Vec<&str> = err.lines().filter(|l| l.contains("OLE")).collect();
+    // Fork: reading a file with OLE objects also prints the fork's read note (it
+    // warns that saving as DWG drops them), so the frame-only note is matched
+    // specifically rather than by any line mentioning OLE.
+    let notes: Vec<&str> = err.lines().filter(|l| l.contains("frame only")).collect();
     assert_eq!(notes, [format!("{}: 1 OLE object shown as the frame only (the OLE content is not drawn)", input.display())], "{err}");
 }
 

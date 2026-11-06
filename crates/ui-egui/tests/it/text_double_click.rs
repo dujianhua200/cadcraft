@@ -25,6 +25,7 @@ fn harness_from(mut app: CadApp) -> Harness<'static, CadApp> {
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("text", json!({ "at": [0, 0], "text": "HELLO", "height": 2.5 })).unwrap();
     app.run("mtext", json!({ "at": [0, 20], "text": "first\\Psecond", "height": 2.5, "width": 20 })).unwrap();
     app.run("line", json!({ "points": [[30, 0], [30, 20]] })).unwrap();
@@ -89,17 +90,21 @@ fn double_clicked_text_takes_ime_composition_and_commit() {
         h.ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
     }
     // Composition is shown, not saved; the commit is inserted exactly once (#1761).
+    // Fork: the in-place editor's text field owns the IME while it is open
+    // (upstream collected the text at the command line), so the composition and
+    // the commit land in the editor, and the drawing changes only when Enter
+    // finishes the editor.
     h.event(Event::Ime(ImeEvent::Preedit { text: "zhong".into(), active_range_chars: None }));
     h.run_steps(1);
-    assert_eq!(h.state().cmd.preedit, "zhong");
     assert!(h.state().cmd.buffer.is_empty());
+    assert_eq!(text_at(&h, 0), "HELLO", "a preedit changes nothing yet");
     h.event(Event::Ime(ImeEvent::Commit("中文".into())));
     h.run_steps(1);
-    assert!(h.state().cmd.preedit.is_empty());
-    assert_eq!(h.state().cmd.buffer, "中文");
+    assert_eq!(text_at(&h, 0), "HELLO", "the commit waits in the editor until it finishes");
     h.key_press(Key::Enter);
     h.run_steps(1);
-    assert_eq!(text_at(&h, 0), "中文");
+    let text = text_at(&h, 0);
+    assert!(text.contains("中文") && !text.contains("zhong"), "the commit is applied once, the preedit never: {text}");
 }
 
 #[test]
@@ -135,6 +140,7 @@ fn double_click_on_overshoot_glyph_of_cjk_text_starts_textedit() {
     // Zoomed-in view: double-click the first glyph of a CJK label. The pick box now
     // measures by renderer advance, so the first glyph is inside it.
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [0, 0], "text": "中文标签测试", "height": 2.5 })).unwrap();
     app.session.execute("view.set", &json!({ "center": [5, 1], "height": 20 })).unwrap();
@@ -154,6 +160,7 @@ fn double_click_on_overshoot_glyph_of_long_cjk_text_starts_textedit() {
     // renderer advance, so the last glyph is inside it (previously it overshot by
     // ~4.75 units and only the expanded-box retry found it).
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [0, 0], "text": "这是一个很长的中文标签用于测试双击", "height": 2.5 })).unwrap();
     app.session.execute("view.set", &json!({ "center": [24, 1], "height": 40 })).unwrap();
@@ -181,6 +188,7 @@ fn overshoot_point_mtext(app: &CadApp) -> Option<Vec2> {
 #[test]
 fn double_click_on_overshoot_glyph_of_cjk_mtext_starts_textedit() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("mtext", json!({ "at": [0, 0], "text": "中文多行文字测试内容", "height": 2.5, "width": 0 })).unwrap();
     app.session.execute("view.set", &json!({ "center": [12, 0], "height": 40 })).unwrap();
@@ -196,6 +204,7 @@ fn double_click_on_overshoot_glyph_of_cjk_mtext_starts_textedit() {
 #[test]
 fn double_click_small_text_at_large_coordinates_starts_textedit() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [30000, -10000], "text": "FAR", "height": 0.5 })).unwrap();
     app.session.execute("view.set", &json!({ "center": [30002, -9999], "height": 40 })).unwrap();
@@ -207,6 +216,7 @@ fn double_click_small_text_at_large_coordinates_starts_textedit() {
 #[test]
 fn double_click_on_locked_layer_text_hints_unlock() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [0, 0], "text": "LOCKED", "height": 2.5 })).unwrap();
     let handle = app.session.doc().unwrap().model.iter().next().unwrap().handle.hex();
@@ -224,6 +234,7 @@ fn double_click_on_locked_layer_text_hints_unlock() {
 #[test]
 fn double_click_on_text_inside_a_block_hints_block_editor() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [0, 0], "text": "INBLOCK", "height": 2.5 })).unwrap();
     let handle = app.session.doc().unwrap().model.iter().next().unwrap().handle.hex();
@@ -244,6 +255,7 @@ fn double_click_on_text_inside_a_block_hints_block_editor() {
 #[test]
 fn double_click_on_picked_block_reference_hints_block_editor() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("text", json!({ "at": [0, 0], "text": "INBLOCK", "height": 2.5 })).unwrap();
     let handle = app.session.doc().unwrap().model.iter().next().unwrap().handle.hex();
@@ -264,6 +276,7 @@ fn double_click_on_picked_block_reference_hints_block_editor() {
 #[test]
 fn double_click_on_block_attribute_hints_block_editor() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.interface_language = Preference::English;
     app.run("attdef", json!({ "tag": "T", "default": "one", "at": [0, 1], "height": 2.5 })).unwrap();
     app.run("line", json!({ "points": [[0, 0], [10, 0]] })).unwrap();

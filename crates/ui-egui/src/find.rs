@@ -62,11 +62,11 @@ fn locate(app: &mut CadApp, st: &mut FindState) {
 }
 
 pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
-    let sid = egui::Id::new("find_state");
+    let sid = egui::Id::unique("find_state");
     let mut st: FindState = ctx.data_mut(|d| d.get_temp(sid)).unwrap_or_default();
     let mut close = false;
     egui::Window::new(crate::tl!("Find and Replace"))
-        .id(egui::Id::new("Find and Replace"))
+        .id(egui::Id::unique("Find and Replace"))
         .open(open)
         .collapsible(false)
         .resizable(false)

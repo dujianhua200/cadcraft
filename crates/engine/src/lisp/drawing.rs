@@ -403,7 +403,6 @@ fn make_entity(ctx: &mut Ctx<'_>, list: &Value) -> Option<Handle> {
     }
 }
 
-
 pub fn entmake(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, LispError> {
     arity(&a, 0, 1)?;
     let Some(list) = a.first().filter(|v| !v.is_nil()) else { return Ok(Flow::Value(Value::Nil)) };

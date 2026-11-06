@@ -28,6 +28,7 @@ fn canvas_cursor(app: &mut CadApp) -> egui::CursorIcon {
 #[test]
 fn system_cursor_stays_visible_over_the_canvas_when_requested() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.ui.system_cursor = false;
     assert_eq!(canvas_cursor(&mut app), egui::CursorIcon::None, "default: the drawn crosshair replaces the OS cursor");
 
@@ -41,6 +42,7 @@ fn system_cursor_stays_visible_over_the_canvas_when_requested() {
 #[test]
 fn the_host_default_survives_saved_profiles_and_resets() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.run("options", serde_json::json!({ "reset": true })).unwrap();
     assert!(!app.ui.system_cursor, "off without a host default");
 

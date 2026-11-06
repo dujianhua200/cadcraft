@@ -14,6 +14,7 @@ fn harness() -> Harness<'static, CadApp> {
 
 fn harness_from_prefs(prefs: &str, render: bool) -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.load_prefs(prefs);
     app.ui.start_tab = false;
     app.ui.in_window_menu = false;
@@ -61,6 +62,7 @@ fn restarting_restores_calculator_data_and_ui_edits_are_saved_when_hidden() {
     h.state_mut().run("ui.toggle.quickcalc", Value::Null).unwrap();
     h.run_steps(5);
     let mut restarted = CadApp::new(Session::default(), Services::default());
+    restarted.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     restarted.load_prefs(&h.state().prefs_json());
     let prefs: Value = serde_json::from_str(&restarted.prefs_json()).unwrap();
     assert_eq!(prefs["quickcalc"]["history"], json!([]));
@@ -140,6 +142,7 @@ fn window_menu_toggle_preserves_calculator_history_and_command_line_input() {
 fn toggle_restores_floating_or_docked_location_without_hiding_other_panels() {
     for floating in [false, true] {
         let mut app = CadApp::new(Session::default(), Services::default());
+        app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
         app.run("ui.panel.quickcalc", Value::Null).unwrap();
         let params = if floating {
             json!({"operation":"float", "panel":"quickCalc", "rect":[80,120,360,480]})
@@ -161,6 +164,7 @@ fn toggle_restores_floating_or_docked_location_without_hiding_other_panels() {
 #[test]
 fn explicit_opens_still_reveal_and_calculations_do_not_open_the_palette() {
     let mut app = CadApp::new(Session::default(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     let value = app.run("cal", json!({"expr":"2+3"})).unwrap();
     assert_eq!(value["value"], 5.0);
     assert!(app.cmdline(r#"quickcalc {"expr":"2+3"}"#).is_none());

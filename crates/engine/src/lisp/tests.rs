@@ -93,7 +93,12 @@ fn equality_compares_symbols_as_autolisp_does() {
 
     // A mismatch of kinds is nil, not an error; numbers and strings are unchanged.
     assert_eq!(ok(&mut s, "(= 1 \"1\")"), "nil");
-    assert_eq!(ok(&mut s, "(= '(1) '(1))"), "nil", "`=` is not `equal`");
+    // FORK DIVERGENCE (2026-11-06 sync): upstream asserts `(= '(1) '(1))` is nil
+    // ("`=` is not `equal`", #1597). This fork's `=` has always compared two
+    // lists structurally, and fork LISP routines may rely on it, so the fork
+    // behaviour stays and this one assertion follows it. All other #1597
+    // behaviour (symbol type tests, kind mismatch = nil, no errors) is kept.
+    assert_eq!(ok(&mut s, "(= '(1) '(1))"), "T", "fork: `=` compares lists structurally");
     assert_eq!(ok(&mut s, "(= nil nil)"), "T");
     assert_eq!(ok(&mut s, "(= 1 1.0)"), "T");
     assert_eq!(ok(&mut s, "(= \"a\" \"a\" \"a\")"), "T");

@@ -381,7 +381,48 @@ fn user_qsave(app: &mut CadApp) -> Option<Result<Value, String>> {
     app.hold_lossy_save().then_some(Ok(Value::Null))
 }
 
-fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+/// File ▸ Import ▸ OviMap GeoJSON… / File ▸ Export ▸ OviMap… (fork commands):
+/// pick the file, run the engine command, echo the report. (The engine commands
+/// themselves never open a picker, per the gis.rs contract.) Split out of
+/// `run_ui_command_inner`'s match for the cognitive-complexity gate; semantics
+/// are the arms' own (a missing save picker yields `None` here, which the
+/// caller's match then also answers with `None`).
+fn route_ovimap_picker(app: &mut CadApp, id: &str, no_path: bool) -> Option<Result<Value, String>> {
+    match id {
+        "ovimap.import" if no_path && app.services.pick_open.is_some() => {
+            let r = if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
+                let r = app.session.execute("ovimap.import", &json!({ "path": p })).map_err(|e| e.to_string());
+                app.session.echo(match &r {
+                    Ok(v) => {
+                        let g = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+                        format!("OviMap import: {} added, {} updated, {} skipped", g("added"), g("updated"), g("skipped"))
+                    }
+                    Err(e) => e.clone(),
+                });
+                r
+            } else {
+                Ok(Value::Null)
+            };
+            Some(r)
+        }
+        "ovimap.export" if no_path => {
+            let pick = app.services.pick_save.as_ref()?;
+            let Some(path) = pick("drawing.ovimap.geojson") else { return Some(Ok(Value::Null)) };
+            let r = app.session.execute("ovimap.export", &json!({ "path": path })).map_err(|e| e.to_string());
+            app.session.echo(match &r {
+                Ok(_) => format!("Exported OviMap GeoJSON to {path}"),
+                Err(e) => e.clone(),
+            });
+            Some(r)
+        }
+        _ => None,
+    }
+}
+
+/// The first-pass routes of [`run_ui_command_inner`]: the subsystem routers,
+/// recent files, preferences, toggles, language, close, the OviMap pickers and
+/// the typed-FIND dialog. Split out for the cognitive-complexity gate.
+fn route_ui_first_pass(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
     if let Some(result) = route_ui_subsystems(app, id, params) {
         return Some(result);
     }
@@ -404,12 +445,23 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
     if let Some(result) = run_close_command(app, id, params) {
         return Some(result);
     }
+    if let Some(result) = route_ovimap_picker(app, id, no_path) {
+        return Some(result);
+    }
     // FIND typed, or chosen from Edit ▸ Find..., opens the window; a JSON call carries `find`
     // and falls through to the engine, so scripts, LISP and the MCP server keep their answer.
     if id == "find" && params.is_null() {
         app.ui.dialog = Some("find".to_string());
         return Some(Ok(Value::Null));
     }
+    None
+}
+
+fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if let Some(result) = route_ui_first_pass(app, id, params) {
+        return Some(result);
+    }
+    let no_path = should_pick_file_path(id, params);
     let r = match id {
         "ui.open" | "open" if no_path => {
             let picked = app.services.pick_open.as_ref().and_then(|f| f());
@@ -464,34 +516,6 @@ fn run_ui_command_inner(app: &mut CadApp, id: &str, params: &Value) -> Option<Re
                 return Some(app.session.execute("saveas", &saveas_params(&app.ui, &app.session, &p)).map_err(|e| e.to_string()));
             }
             Ok(Value::Null)
-        }
-        // File ▸ Import ▸ OviMap GeoJSON…: pick the file, run the import, echo the report.
-        // (The engine command itself never opens a picker, per the gis.rs contract.)
-        "ovimap.import" if no_path && app.services.pick_open.is_some() => {
-            if let Some(p) = app.services.pick_open.as_ref().and_then(|f| f()) {
-                let r = app.session.execute("ovimap.import", &json!({ "path": p })).map_err(|e| e.to_string());
-                app.session.echo(match &r {
-                    Ok(v) => {
-                        let g = |k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
-                        format!("OviMap import: {} added, {} updated, {} skipped", g("added"), g("updated"), g("skipped"))
-                    }
-                    Err(e) => e.clone(),
-                });
-                r
-            } else {
-                Ok(Value::Null)
-            }
-        }
-        // File ▸ Export ▸ OviMap…: pick the destination, export the GeoJSON envelope.
-        "ovimap.export" if no_path => {
-            let pick = app.services.pick_save.as_ref()?;
-            let Some(path) = pick("drawing.ovimap.geojson") else { return Some(Ok(Value::Null)) };
-            let r = app.session.execute("ovimap.export", &json!({ "path": path })).map_err(|e| e.to_string());
-            app.session.echo(match &r {
-                Ok(_) => format!("Exported OviMap GeoJSON to {path}"),
-                Err(e) => e.clone(),
-            });
-            r
         }
         "qsave" if no_path => return user_qsave(app),
         // EXPORTPDF from the menu or typed: ask where to save the PDF (PLOT and PRINT open the Plot

@@ -8,6 +8,7 @@ use serde_json::json;
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.canvas.zoom_pending = false;
     app.session.execute("line", &json!({"points":[[0,0],[10,0]]})).unwrap();
     app.session.execute("view.set", &json!({"center":[5,0],"height":30})).unwrap();
@@ -48,6 +49,7 @@ fn selection_tab_checkbox_updates_and_persists_the_preference() {
     assert!(!h.state().session.settings.pickdrag);
     let saved = h.state().profile_json();
     let mut restored = CadApp::new(Session::new(), Services::default());
+    restored.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     restored.load_profile(&saved);
     assert!(!restored.session.settings.pickdrag);
     if let Some(dir) = std::env::var_os("CADCRAFT_SELECTION_SHOTS") {

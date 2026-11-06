@@ -537,7 +537,10 @@ pub fn shape_line_dir(font: &TextFont, s: &str, height: f64, width_factor: f64, 
 pub fn em_to_cap(font: &TextFont, em: f64) -> f64 {
     match font {
         TextFont::Outline(face) => em * ttf::cap_ratio(face).unwrap_or(1.0),
-        TextFont::Stroke => em,
+        // Stroke faces shape at the height given; SHX faces (upstream's variant)
+        // likewise take the TEXT height directly in `shx::shape`, so both pass
+        // an em height through unchanged.
+        TextFont::Stroke | TextFont::Shx(_) => em,
     }
 }
 /// Single-line TEXT (and attributes) runs left to right, as AutoCAD lays it out: neutral

@@ -1,6 +1,4 @@
-use super::draw::draw_list;
-use super::grid::draw_grid;
-use super::{CadApp, Color32, Pos2, Rect, Rgb, Shape, Stroke, Tokens, Xf, pos2, vec2};
+use super::{CadApp, Color32, Pos2, Rect, Shape, Stroke, Tokens, Xf, pos2, vec2};
 
 pub(super) fn tile_rects(app: &CadApp, full: Rect) -> Vec<(Rect, cadcraft_engine::ModelTile)> {
     let x = |f: f64| full.left() + full.width() * f.clamp(0.0, 1.0) as f32;
@@ -17,27 +15,9 @@ pub(super) fn tile_xf(r: Rect, tile: &cadcraft_engine::ModelTile) -> Xf {
     Xf { rect: r, center: tile.view.center, scale: f64::from(r.height()) / tile.view.height.max(1e-12), twist: tile.view.twist }
 }
 
-/// The tiles other than the current one (each with its own view, clipped to it), then the
-/// tile borders: thin, and heavy around the current tile.
-pub(super) fn draw_tiles(app: &CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
-    let t = Tokens::get();
-    let bg = Rgb(t.canvas.r(), t.canvas.g(), t.canvas.b());
-    for (r, tile) in tiles.iter().filter(|(r, tile)| !tile.active && r.width() >= 1.0 && r.height() >= 1.0) {
-        let p = ui.painter_at(*r);
-        let xf = tile_xf(*r, tile);
-        p.rect_filled(*r, 0.0, t.canvas);
-        draw_grid(app, &p, &xf);
-        if let Some(list) = &app.canvas.list {
-            draw_list(&p, &xf, list, bg, app.session.settings.lwdisplay);
-        }
-        viewport_label(&p, *r);
-    }
-    let p = ui.painter();
-    for (r, tile) in tiles {
-        let (w, c) = if tile.active { (2.0, t.accent) } else { (1.0, t.border) };
-        p.rect_stroke(*r, 0.0, Stroke::new(w, c), egui::StrokeKind::Outside);
-    }
-}
+// Fork: upstream's `draw_tiles` was here; the canvas root module carries a
+// superset (same tiling + the basemap tilemap pass per tile) under the same name,
+// which is the one `canvas::show` calls. Removed to avoid a dead duplicate.
 
 /// A small padlock, drawn in code: body plus shackle.
 pub(super) fn draw_lock(p: &egui::Painter, c: Pos2, color: Color32) {

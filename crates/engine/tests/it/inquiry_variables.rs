@@ -196,11 +196,12 @@ fn dist_with_multiple_points_sets_the_total_and_lastpoint_at_the_last() {
 #[test]
 fn measuregeom_sets_them_as_dist_and_area_do() {
     let mut s = Session::new();
-    // (AutoCAD's MEASUREGEOM asks for the next option after each measurement until eXit; here it
-    // ends after one.)
-    lisp(&mut s, "(command \"_.MEASUREGEOM\" \"_D\" '(0.0 0.0) '(30.0 40.0))");
+    // (AutoCAD's MEASUREGEOM asks for the next option after each measurement until eXit;
+    // upstream ended it after one measurement — the fork keeps AutoCAD's loop, so the
+    // scripts below end with the "" that leaves the options prompt.)
+    lisp(&mut s, "(command \"_.MEASUREGEOM\" \"_D\" '(0.0 0.0) '(30.0 40.0) \"\")");
     assert!(close(var(&s, "DISTANCE"), 50.0), "{}", var(&s, "DISTANCE"));
-    lisp(&mut s, "(command \"_.MEASUREGEOM\" \"_AR\" '(0.5 0.25) '(0.54 0.25) '(0.54 0.28) '(0.5 0.28) \"\")");
+    lisp(&mut s, "(command \"_.MEASUREGEOM\" \"_AR\" '(0.5 0.25) '(0.54 0.25) '(0.54 0.28) '(0.5 0.28) \"\" \"\")");
     assert!(close(var(&s, "AREA"), 0.0012) && close(var(&s, "PERIMETER"), 0.14), "{} {}", var(&s, "AREA"), var(&s, "PERIMETER"));
 }
 

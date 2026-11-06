@@ -1417,7 +1417,6 @@
 	Specify total length or	Укажіть загальну довжину або
 	Text inside a block cannot be edited here. Enter the block editor to edit it.	Текст усередині блока тут не можна редагувати. Увійдіть у редактор блока, щоб відредагувати його.
 	Text on a locked layer cannot be edited. Unlock the layer first.	Текст на заблокованому шарі не можна редагувати. Спочатку розблокуйте шар.
-	WCS ⌄	ССК ⌄
 # OviMap link + tilemap commands (docs/ovimap-link.md §7.2, §9).
 	Assign OviMap Identity	Призначити ідентифікатор OviMap
 	Export OviMap…	Експортувати OviMap…

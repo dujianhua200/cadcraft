@@ -29,7 +29,8 @@ fn save_lists_the_entities_the_file_does_not_keep() {
     let r = s.execute("saveas", &json!({ "path": path.to_string_lossy() })).unwrap();
     let _ = std::fs::remove_file(&path);
     assert_eq!(r["notSaved"], json!({ "3DSOLID": 1, "MLINE": 2, "REGION": 1 }));
-    let msg = "未保存到 DWG 文件中（其写入器尚不支持这些对象类型；DXF 会保留它们，实体仅在保存为 2010 或更早版本时才保留）：1 3DSOLID，2 MLINE，1 REGION";
+    let msg =
+        "未保存到 DWG 文件中（其写入器尚不支持这些对象类型；DXF 会保留它们，实体仅在保存为 2010 或更早版本时才保留）：1 3DSOLID，2 MLINE，1 REGION";
     assert!(s.log.iter().any(|l| l == msg), "{:?}", s.log);
 
     // DXF keeps them.

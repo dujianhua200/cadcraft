@@ -102,6 +102,9 @@ fn leader_typed_points_then_text() {
     s.input(Input::Enter).unwrap();
     assert!(prompt_text(&s).contains("text"), "{}", prompt_text(&s));
     s.input(Input::Text("note".into())).unwrap();
+    // Upstream's LEADER (AutoCAD 2024 flow) takes further lines after the first;
+    // an empty line ends the annotation.
+    s.input(Input::Enter).unwrap();
     assert!(s.running.is_none());
     assert_eq!(s.doc().unwrap().model.len(), 2, "leader + its text");
 }
@@ -166,6 +169,9 @@ fn measuregeom_typed_distance_loops_back_to_options() {
 fn angle_measure_typed_three_points() {
     let mut s = Session::new();
     s.start("angle.measure").unwrap();
+    // Upstream's Angle (MEASUREGEOM flow) first offers to select an object;
+    // Enter switches to specifying the vertex and endpoints.
+    s.input(Input::Enter).unwrap();
     s.input(Input::Point(Vec2::new(0.0, 0.0))).unwrap();
     s.input(Input::Point(Vec2::new(10.0, 0.0))).unwrap();
     s.input(Input::Point(Vec2::new(0.0, 10.0))).unwrap();
@@ -177,9 +183,9 @@ fn angle_measure_typed_three_points() {
 fn radius_measure_typed_pick_circle() {
     let mut s = Session::new();
     s.execute("circle", &json!({ "center": [0, 0], "radius": 7.0 })).unwrap();
-    let h = s.doc().unwrap().model.last().unwrap().handle;
     s.start("radius.measure").unwrap();
-    s.input(Input::Pick(vec![h])).unwrap();
+    // Upstream's Radius picks by point on the curve, not by handle selection.
+    s.input(Input::Point(Vec2::new(7.0, 0.0))).unwrap();
     assert!(s.running.is_none());
     assert!(logged(&s, "Radius = 7"), "{:?}", s.log);
 }

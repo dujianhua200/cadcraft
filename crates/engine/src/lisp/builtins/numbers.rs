@@ -279,6 +279,10 @@ fn eq_chain(a: &[Value], want_equal: bool) -> R {
         let same = match (x, y) {
             (Value::Str(_), Value::Str(_)) => compare(x, y)?.is_eq(),
             _ if x.as_number().is_some() && y.as_number().is_some() => compare(x, y)?.is_eq(),
+            // Fork: two lists compare structurally, as this fork's `=` always has
+            // (AutoLISP answers T for `(= '(1 2) '(1 2))`); atoms keep upstream's
+            // `eq` fallback above. (Lists are `Cons` cells; `Nil` is the empty list.)
+            _ if matches!(x, Value::Cons(_) | Value::Nil) && matches!(y, Value::Cons(_) | Value::Nil) => crate::lisp::value::equal(x, y, 0.0),
             _ => eq(x, y),
         };
         if same != want_equal {

@@ -27,7 +27,7 @@
 use cadcraft_doc::gis::{CoordType, DEFAULT_TILE_ATTRIBUTION, DEFAULT_TILE_MAX_ZOOM, DEFAULT_TILE_URL, TileLayer};
 use serde_json::{Value, json};
 
-use super::*;
+use super::{CommandSpec, bad, str_param};
 use crate::tilemap::{effective_tilemap, is_default_osm};
 use crate::{Accept, Input, Interactive, Prompt, Result, Session, Step};
 

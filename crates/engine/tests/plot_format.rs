@@ -8,7 +8,8 @@ use serde_json::json;
 
 fn session() -> Session {
     set_plotter_store(PlotterStore::memory());
-    set_io(IoHooks { read_progress: None,
+    set_io(IoHooks {
+        read_progress: None,
         read: |_, _| Err("no reader in this test".into()),
         write: |_, _| Err("no writer in this test".into()),
         plot: Some(|d, space, opts| cadcraft_io::plotter::plot(d, space, opts).map_err(|e| e.to_string())),

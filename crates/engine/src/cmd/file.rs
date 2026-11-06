@@ -907,6 +907,17 @@ pub(super) fn new_folder(path: &str) -> Option<String> {
 
 /// Say on the command line that the file went into a folder that didn't exist, so a mistyped path
 /// is noticed, and name the folder in the result's `createdFolder`.
+pub(super) fn report_loss(s: &mut Session, r: &mut Value, path: &str) {
+    if is_dxf_file(path) {
+        if drawing_version(s, path) >= Version::R2013 {
+            report_sat_text_dropped(s, r);
+        }
+    } else {
+        let lost = loss_on_save(s, path);
+        report_not_saved(s, r, &lost);
+    }
+}
+
 pub(super) fn report_new_folder(s: &mut Session, r: &mut Value, folder: Option<String>) {
     let Some(folder) = folder else { return };
     s.echo(format!("Created the folder {folder}, which did not exist. Check the path if you did not mean to."));

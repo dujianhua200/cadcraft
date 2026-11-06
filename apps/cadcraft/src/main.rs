@@ -279,6 +279,10 @@ fn apply_desktop_events(cad: &mut CadApp, events: Vec<open_file::DesktopEvent>) 
 
 /// The control port from `--control <port>` or `CADCRAFT_CONTROL_PORT` (`source`); a value that is
 /// not a port is logged and ignored instead of silently starting no control channel.
+// Fork note: upstream replaced this hand-rolled parser with `launch_args`
+// (clap; a bad flag is a usage error, exit 2). The parser and its unit tests
+// are kept for reference under `cfg(test)` only — `main` does not call them.
+#[cfg(test)]
 fn control_port_from(source: &str, value: Option<String>) -> Option<u16> {
     let value = value?;
     let port = value.trim().parse().ok();
@@ -290,6 +294,7 @@ fn control_port_from(source: &str, value: Option<String>) -> Option<u16> {
 
 /// `--control` followed by `value`: a bare `--control` (last argument) keeps the port already
 /// read from `CADCRAFT_CONTROL_PORT` (`current`) instead of turning the control channel off.
+#[cfg(test)]
 fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
     if value.is_some() {
         return control_port_from("--control", value);
@@ -303,6 +308,7 @@ fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
 
 /// The command-line arguments `main` acts on: `--control <port>`, `--sample`, files to
 /// open, and `--version` / `-V` (which prints and exits before any log file is opened).
+#[cfg(test)]
 struct StartupArgs {
     control_port: Option<u16>,
     files: Vec<String>,
@@ -314,6 +320,7 @@ struct StartupArgs {
 /// port from `CADCRAFT_CONTROL_PORT`, which a bare `--control` keeps. Anything that is not
 /// a recognised flag is a file to open, so `cadcraft drawing.dwg` and `cadcraft --bogus`
 /// both reach `open_path` (the latter fails there, like a bad File ▸ Open).
+#[cfg(test)]
 fn parse_startup_args(mut args: impl Iterator<Item = String>, env_port: Option<u16>) -> StartupArgs {
     let mut control_port = env_port;
     let mut files = Vec::new();
@@ -510,8 +517,8 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::{
-        CadApp, Services, Session, apply_desktop_events, filters_for_save, follow_desktop, install_io, open_file::DesktopEvent,
-        parse_startup_args, saved_window, window_options,
+        CadApp, Services, Session, apply_desktop_events, filters_for_save, follow_desktop, install_io, open_file::DesktopEvent, parse_startup_args,
+        saved_window, window_options,
     };
 
     #[test]
@@ -597,7 +604,7 @@ mod tests {
 
     #[test]
     fn desktop_quit_event_requests_quit() {
-        let mut app = CadApp::new(Session::new(), Services { pick_open: None, pick_save: None });
+        let mut app = CadApp::new(Session::new(), Services::default());
         apply_desktop_events(&mut app, vec![DesktopEvent::Quit]);
         assert!(app.quit_requested);
     }
@@ -613,7 +620,7 @@ mod tests {
         let path = dir.join("empty.dxf");
         let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nENDSEC\n0\nSECTION\n2\nBLOCKS\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n";
         assert!(std::fs::write(&path, dxf).is_ok());
-        let mut app = CadApp::new(Session::empty(), Services { pick_open: None, pick_save: None });
+        let mut app = CadApp::new(Session::empty(), Services::default());
         let before = app.session.docs.len();
         apply_desktop_events(&mut app, vec![DesktopEvent::Open(path.clone())]);
         let start = std::time::Instant::now();

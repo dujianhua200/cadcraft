@@ -100,10 +100,9 @@ impl Opening {
         let Some(label) = self.label() else { return };
         let t = Tokens::get();
         let mut cancel = false;
-        egui::Area::new(egui::Id::unique("cc_opening"))
-            .order(egui::Order::Foreground)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("cc_opening")).order(egui::Order::Foreground).anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO).show(
+            ctx,
+            |ui| {
                 egui::Frame::NONE
                     .fill(t.panel)
                     .stroke(egui::Stroke::new(1.0, t.accent))
@@ -118,7 +117,8 @@ impl Opening {
                             }
                         });
                     });
-            });
+            },
+        );
         if cancel {
             self.cancel_all();
         }

@@ -266,6 +266,7 @@ mod tests {
     #[test]
     fn typed_length_tab_and_enter_place_the_grip_and_keywords_pass_through() {
         let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        app.ui.interface_language = crate::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
         let r = app.session.execute("line", &serde_json::json!({"points": [[0, 0], [10, 0]]})).unwrap();
         let h = Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();
         let ctx = egui::Context::default();
@@ -308,6 +309,7 @@ mod tests {
     fn circle_radius_shows_one_distance_field_and_typed_value_is_the_radius() {
         for cartesian in [true, false] {
             let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+            app.ui.interface_language = crate::i18n::Preference::English;
             app.session.settings.dynpi_cartesian = cartesian;
             // The UCS icon paints "X" and "Y" too.
             app.ui.show_ucs_icon = false;
@@ -345,6 +347,7 @@ mod tests {
     #[test]
     fn length_fields_follow_the_drawing_units() {
         let mut app = CadApp::new(cadcraft_engine::Session::new(), crate::Services::default());
+        app.ui.interface_language = crate::i18n::Preference::English;
         app.session.execute("units", &serde_json::json!({"lunits": 4, "luprec": 4})).unwrap();
         let r = app.session.execute("line", &serde_json::json!({"points": [[0, 0], [10, 0]]})).unwrap();
         let h = Handle::parse_hex(r["handles"][0].as_str().unwrap()).unwrap();

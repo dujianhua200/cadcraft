@@ -282,8 +282,14 @@ fn run_find(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc()?;
     // The whole current space by default; the Find window narrows it to the objects its result
     // list already holds, so Replace All touches exactly what the user can see.
+    // Fork: an unreadable `handles` entry is an error, not a silent whole-drawing
+    // search (the parity audit's FIND contract; upstream's filter_map tolerance
+    // dropped this). Well-formed handles of since-deleted objects still skip.
     let hs: Vec<Handle> = match p.get("handles").and_then(Value::as_array) {
-        Some(a) => a.iter().filter_map(|v| v.as_str().and_then(Handle::parse_hex)).collect(),
+        Some(a) => a
+            .iter()
+            .map(|v| v.as_str().and_then(Handle::parse_hex).ok_or_else(|| bad("find", format!("`handles`: {v} is not an object handle"))))
+            .collect::<std::result::Result<_, _>>()?,
         None => d.space(&space).map(|st| st.handles()).unwrap_or_default(),
     };
     let mut found: Vec<Value> = Vec::new();
@@ -696,14 +702,28 @@ impl Interactive for MeasureM {
         }
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
+        // Fork (AutoCAD MEASUREGEOM, parity audit): a finished sub-measurement
+        // returns to the options prompt; the command ends on Enter at the options
+        // or on Esc. Upstream passed the sub-machine's Done straight through,
+        // ending MEASUREGEOM after a single measurement.
         if let Some(m) = &mut self.inner {
-            return m.input(s, i);
+            let step = m.input(s, i)?;
+            if matches!(step, Step::Done) {
+                self.inner = None;
+                return Ok(Step::Continue);
+            }
+            return Ok(step);
         }
         if self.radius {
-            return RadiusM::pick(s, i);
+            let step = RadiusM::pick(s, i)?;
+            if matches!(step, Step::Done) {
+                self.radius = false;
+                return Ok(Step::Continue);
+            }
+            return Ok(step);
         }
         match i {
-            Input::Enter => self.inner = Some(Box::new(super::inquiry::DistM::default())),
+            Input::Enter => return Ok(Step::Done),
             Input::Keyword(k) => match k.as_str() {
                 "Radius" => self.radius = true,
                 "Angle" => self.inner = Some(Box::<AngleM>::default()),

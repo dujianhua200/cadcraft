@@ -182,12 +182,8 @@ fn append_georef(tags: &mut Vec<Tag>, d: &Drawing) {
         return;
     }
     // Handles above every handle in the file (handles are hex in groups 5 and 105).
-    let mut next = tags
-        .iter()
-        .filter(|t| t.code == 5 || t.code == 105)
-        .filter_map(|t| u64::from_str_radix(t.str().trim(), 16).ok())
-        .max()
-        .unwrap_or(0x100);
+    let mut next =
+        tags.iter().filter(|t| t.code == 5 || t.code == 105).filter_map(|t| u64::from_str_radix(t.str().trim(), 16).ok()).max().unwrap_or(0x100);
     let mut alloc = move || {
         next = next.saturating_add(1);
         format!("{next:X}")
@@ -196,19 +192,17 @@ fn append_georef(tags: &mut Vec<Tag>, d: &Drawing) {
     let georef_handle = d.georef.as_ref().map(|_| alloc());
     let vertex_handles: Vec<String> = vertices.iter().map(|_| alloc()).collect();
     // The root dictionary entry, at the end of its record.
-    tags.splice(
-        dict_end..dict_end,
-        [Tag::s(3, dxf_ext::OVIMAP_GEOREF_KEY), Tag::s(350, dict_handle.clone())],
-    );
+    tags.splice(dict_end..dict_end, [Tag::s(3, dxf_ext::OVIMAP_GEOREF_KEY), Tag::s(350, dict_handle.clone())]);
     // The new records, just before the OBJECTS ENDSEC (which the splice just shifted by 2).
     let Some(endsec) = tags.iter().skip(sec).position(|t| t.code == 0 && t.str() == "ENDSEC").map(|i| sec + i) else { return };
-    let mut recs: Vec<Tag> = Vec::new();
-    recs.push(Tag::s(0, "DICTIONARY"));
-    recs.push(Tag::s(5, dict_handle.clone()));
-    recs.push(Tag::s(330, root));
-    recs.push(Tag::s(100, "AcDbDictionary"));
-    recs.push(Tag::i(280, 1));
-    recs.push(Tag::i(281, 1));
+    let mut recs: Vec<Tag> = vec![
+        Tag::s(0, "DICTIONARY"),
+        Tag::s(5, dict_handle.clone()),
+        Tag::s(330, root),
+        Tag::s(100, "AcDbDictionary"),
+        Tag::i(280, 1),
+        Tag::i(281, 1),
+    ];
     if let Some(h) = &georef_handle {
         recs.push(Tag::s(3, dxf_ext::OVIMAP_GEOREF_ENTRY));
         recs.push(Tag::s(350, h.clone()));

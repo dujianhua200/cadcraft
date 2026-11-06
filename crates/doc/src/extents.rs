@@ -477,9 +477,7 @@ fn bounds_in<'a>(d: &'a Drawing, e: &Entity, depth: usize, blocks: &mut HashMap<
         EntityKind::Text(t) if blank(&t.value) => Bounds2::EMPTY,
         EntityKind::MText(t) if blank(&t.contents) => Bounds2::EMPTY,
         // Text that matches the layout's orientation is drawn upright (#2498).
-        EntityKind::Text(t) if e.common.matches_layout_orientation() => {
-            text_box(&crate::Text { rotation: 0.0, ..t.clone() }, &t.value)
-        }
+        EntityKind::Text(t) if e.common.matches_layout_orientation() => text_box(&crate::Text { rotation: 0.0, ..t.clone() }, &t.value),
         EntityKind::MText(t) if e.common.matches_layout_orientation() => mtext_box(&crate::MText { rotation: 0.0, ..t.clone() }),
         EntityKind::Text(t) => text_box(t, &t.value),
         EntityKind::AttDef(a) => text_box(&a.text, &a.tag),
@@ -812,12 +810,14 @@ mod tests {
     #[test]
     fn ole_frame_counts_in_extents() {
         let tag = |code: i32, value: &str| crate::RawTag { code, value: value.into() };
-        let frame = |tags: Vec<crate::RawTag>| EntityKind::Unknown(crate::Unknown { dxf_type: "OLE2FRAME".into(), tags });
+        let frame = |tags: Vec<crate::RawTag>| EntityKind::Unknown(crate::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
         let b = bounds(frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")]));
         assert_eq!((b.min, b.max), (Vec2::new(30.0, -22.0), Vec2::new(35.0, -19.0)));
         assert!(bounds(frame(vec![tag(10, "1"), tag(20, "2")])).is_empty(), "one corner is not a frame");
         assert!(bounds(frame(vec![tag(10, "NaN"), tag(20, "0"), tag(11, "1"), tag(21, "inf")])).is_empty());
-        assert!(bounds(EntityKind::Unknown(crate::Unknown { dxf_type: "OTHER".into(), tags: vec![tag(10, "5"), tag(20, "5")] })).is_empty());
+        assert!(
+            bounds(EntityKind::Unknown(crate::Unknown { dxf_type: "OTHER".into(), tags: vec![tag(10, "5"), tag(20, "5")], ole: None })).is_empty()
+        );
     }
 
     /// Groups 10/20 inside an application-defined `102 {...}` group belong to the application, not

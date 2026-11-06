@@ -511,7 +511,9 @@ fn stripped_drawing_keeps_georef() {
 }
 
 /// TILEMAP (§9): JSON on/off/source/opacity/zoom + interactive prompts.
+/// (One sequential scenario; upstream's cognitive-complexity lint postdates it.)
 #[test]
+#[allow(clippy::cognitive_complexity)]
 fn tilemap_command_json() {
     install_real_hooks();
     let mut s = Session::new();

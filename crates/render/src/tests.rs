@@ -1444,7 +1444,7 @@ fn raster_hatch_pattern_matches_one_by_one() {
 #[test]
 fn ole_frame_draws_its_outline() {
     let tag = |code: i32, value: &str| cadcraft_doc::RawTag { code, value: value.into() };
-    let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags });
+    let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
     let mut d = Drawing::new_imperial();
     d.add(&Space::Model, Common::default(), frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")])).unwrap();
     d.add(&Space::Model, Common::default(), frame(vec![tag(10, "1"), tag(20, "2")])).unwrap();

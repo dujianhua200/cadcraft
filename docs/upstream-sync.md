@@ -68,3 +68,35 @@ Upstream workflows that do not apply to this fork are manual-only:
 - 94 files were changed by both sides; 66 files conflicted. Per-file
   resolutions are summarised in the sync PR description / report; the
   standing rules above were the tie-breakers.
+
+## Behaviour divergences settled during the first sync's test phase
+
+Both sides had tests claiming AutoCAD semantics for the same flows; where
+they conflicted, the fork's audited behaviour (2026-10-22 parity audit) won
+and upstream's tests were adapted, with the divergence noted in the tests:
+
+- **DIST Arc** is the three-point arc (a point on the arc, then its end),
+  not upstream's PLINE-style arc mode (CEnter/Angle/Radius/Second-pt
+  sub-options). AREA keeps upstream's arc mode. MEASUREGEOM's Distance
+  inherits DIST's form.
+- **MEASUREGEOM** returns to its options prompt after each measurement
+  and ends on Enter there (upstream's own note in `inquiry_variables.rs`
+  records that AutoCAD loops until eXit; upstream had simplified to
+  one-shot). Its sub-machines' Done now loops back in `MeasureM`.
+- **LISP `=`** compares two lists structurally (fork), while symbols and
+  atoms keep upstream's #1597 semantics. One upstream assertion was
+  amended and marked as a fork divergence.
+- **ATTREQ** is upstream's session setting only; the fork's duplicate
+  header registration was dropped (the merged code reads the setting).
+- **FIND** JSON `handles`: an unreadable handle is an error again (fork),
+  not silently skipped (upstream's tolerance).
+- **Text picking**: the fork's glyph-ink distance stays, extended so a
+  point inside a letter's outline/stroke cluster counts as on the text
+  (a pick in a glyph counter otherwise missed at small apertures).
+- **Plot attribution** on placed PNG plots anchors just inside the
+  printable area; upstream's blank-outside-printable otherwise erases it.
+- **UI tests**: the fork's Chinese-by-default `UiState` stays; upstream's
+  label-driven UI tests pin English locally where they construct the app.
+- **TEXTEDIT IME**: with the fork's in-place editor open, the editor's
+  text field owns the IME; upstream's two IME tests were adapted to that
+  interaction (composition/commit land in the editor, applied on Enter).

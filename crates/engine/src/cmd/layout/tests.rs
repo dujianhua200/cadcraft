@@ -197,7 +197,8 @@ fn fake_plot(d: &Drawing, space: &Space, opts: &Value) -> std::result::Result<Ve
 
 #[test]
 fn plot_goes_through_the_hook() {
-    super::super::file::set_io(super::super::file::IoHooks { read_progress: None,
+    super::super::file::set_io(super::super::file::IoHooks {
+        read_progress: None,
         read: |_, _| Err("no reader in tests".into()),
         write: |_, _| Err("no writer in tests".into()),
         plot: Some(fake_plot),
@@ -332,7 +333,8 @@ fn plot_help_names_the_device_and_the_built_in_devices() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn plot_path_extension_picks_the_format_like_export() {
-    super::super::file::set_io(super::super::file::IoHooks { read_progress: None,
+    super::super::file::set_io(super::super::file::IoHooks {
+        read_progress: None,
         read: |_, _| Err("no reader in tests".into()),
         write: |_, _| Err("no writer in tests".into()),
         plot: Some(fake_plot),

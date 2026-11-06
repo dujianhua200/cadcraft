@@ -131,6 +131,52 @@ fn text_ink(d: &Drawing, e: &Entity) -> Option<(Vec<Vec<Vec<Vec2>>>, Vec<Vec<Vec
     if glyphs.is_empty() && strokes.is_empty() { None } else { Some((glyphs, strokes)) }
 }
 
+/// Is `p` on a letter of the text: inside a glyph's outline bounds, or inside a
+/// cluster of stroke bounds that touch or nearly touch (a stroke letter's stems
+/// and bars bridge into one cluster; neighbouring letters stay apart)? Aiming
+/// at a letter — including the hollow inside an H or an O — is aiming at the
+/// text, even where no ink passes exactly under the point. (Added at the
+/// 2026-11-06 upstream sync: with ink distance alone, a pick in a glyph's
+/// counter missed the text at the small apertures of a zoomed-in view.)
+fn on_a_glyph(glyphs: &[Vec<Vec<Vec2>>], strokes: &[Vec<Vec2>], p: Vec2, gap: f64) -> bool {
+    let mut boxes: Vec<(Vec2, Vec2)> = Vec::new();
+    let mut push = |pts: &[Vec2]| {
+        let (mut mn, mut mx) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for q in pts {
+            mn = Vec2::new(mn.x.min(q.x), mn.y.min(q.y));
+            mx = Vec2::new(mx.x.max(q.x), mx.y.max(q.y));
+        }
+        if mn.x <= mx.x {
+            boxes.push((mn, mx));
+        }
+    };
+    for g in glyphs {
+        for c in g {
+            push(c);
+        }
+    }
+    for s in strokes {
+        push(s);
+    }
+    // Merge boxes that overlap or nearly touch, until stable.
+    let mut merged = true;
+    while merged {
+        merged = false;
+        'outer: for i in 0..boxes.len() {
+            for j in i + 1..boxes.len() {
+                let (a, b) = (boxes[i], boxes[j]);
+                if a.0.x - gap <= b.1.x && b.0.x - gap <= a.1.x && a.0.y - gap <= b.1.y && b.0.y - gap <= a.1.y {
+                    boxes[i] = (Vec2::new(a.0.x.min(b.0.x), a.0.y.min(b.0.y)), Vec2::new(a.1.x.max(b.1.x), a.1.y.max(b.1.y)));
+                    boxes.remove(j);
+                    merged = true;
+                    break 'outer;
+                }
+            }
+        }
+    }
+    boxes.iter().any(|(mn, mx)| p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y)
+}
+
 /// Distance from `p` to text ink: 0 on a glyph (inside its outline, even-odd over the
 /// glyph's contours) or on a stroke, else the distance to the nearest outline or stroke.
 fn ink_distance(glyphs: &[Vec<Vec<Vec2>>], strokes: &[Vec<Vec2>], p: Vec2) -> f64 {
@@ -163,6 +209,9 @@ pub fn entity_distance(d: &Drawing, e: &Entity, p: Vec2, tol: f64) -> f64 {
             return 0.0;
         }
         let b = entity_bounds(d, e, 0);
+        if b.contains(p) && on_a_glyph(&glyphs, &strokes, p, 0.2 * (b.max.y - b.min.y).abs().max(1e-9)) {
+            return 0.0;
+        }
         return if b.contains(p) { ink.min(dist_to_contour(&b.corners(), p)) } else { ink };
     }
     let polys = hit_polylines(d, e, tol);
@@ -591,7 +640,7 @@ mod tests {
     #[test]
     fn clicking_an_ole_frame_edge_selects_it() {
         let tag = |code: i32, value: &str| cadcraft_doc::RawTag { code, value: value.into() };
-        let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags });
+        let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
         let mut d = Drawing::new_metric();
         let h = d.add(&Space::Model, Common::default(), frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")])).unwrap();
         d.add(&Space::Model, Common::default(), frame(vec![tag(10, "80"), tag(20, "80")])).unwrap();

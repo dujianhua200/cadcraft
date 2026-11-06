@@ -14,6 +14,7 @@ use serde_json::json;
 /// have laid out before the test hovers anything.
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.ui.in_window_menu = true;
     let mut harness = Harness::builder().with_size(vec2(1280.0, 760.0)).build_ui_state(
         |ui, app: &mut CadApp| {
@@ -128,6 +129,7 @@ fn cycle_harness() -> Harness<'static, CadApp> {
     session.execute("setvar", &json!({ "name": "SELECTIONCYCLING", "value": 2 })).unwrap();
     session.set_selection(Vec::new());
     let mut app = CadApp::new(session, Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.ui.in_window_menu = true;
     app.canvas.zoom_pending = true;
     let mut harness = Harness::builder().with_size(vec2(1280.0, 760.0)).build_ui_state(

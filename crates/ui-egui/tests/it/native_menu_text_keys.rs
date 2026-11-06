@@ -10,6 +10,7 @@ use serde_json::json;
 
 fn harness() -> Harness<'static, CadApp> {
     let mut app = CadApp::new(Session::default(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.ui.start_tab = false;
     app.ui.in_window_menu = false;
     let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(

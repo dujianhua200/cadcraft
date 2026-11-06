@@ -147,36 +147,24 @@ fn area_arc_option_measures_arc_segments() {
 
 #[test]
 fn dist_multiple_points_arc_option_adds_arc_lengths() {
+    // FORK DIVERGENCE (2026-11-06 sync): DIST's Arc is AutoCAD's three-point arc
+    // (a point on the arc, then its end), not upstream's PLINE-style arc mode, so
+    // the sequences name the point on the arc (15,5) explicitly and the arc-mode
+    // sub-options (CLose, tangent-continued endpoints, "Invalid arc endpoint")
+    // are not part of DIST here; AREA keeps its arc mode, CLose included.
     // 10 along X, then a half circle of radius 5 up to 10,10: 10 + 5 pi.
-    let (s, log) = run(&["dist", "0,0", "m", "10,0", "a", "10,10"]);
+    let (s, log) = run(&["dist", "0,0", "m", "10,0", "a", "15,5", "10,10"]);
     assert!(has(&log, "Distance = 25.7080"), "{log:?}");
-    assert!(s.prompt_text().contains("Specify endpoint of arc"), "{}", s.prompt_text());
+    assert!(s.prompt_text().contains("Specify next point"), "{}", s.prompt_text());
 
     // Line, then Length continues along the tangent at the arc's end (-X): 5 more.
-    let (s, log) = run(&["dist", "0,0", "m", "10,0", "a", "10,10", "l", "l", "5", ""]);
+    let (s, log) = run(&["dist", "0,0", "m", "10,0", "a", "15,5", "10,10", "l", "l", "5", ""]);
     assert!(has(&log, "Distance = 30.7080"), "{log:?}");
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
     // Undo removes the arc segment.
-    let (_, log) = run(&["dist", "0,0", "m", "10,0", "a", "10,10", "u", ""]);
+    let (_, log) = run(&["dist", "0,0", "m", "10,0", "a", "15,5", "10,10", "u", ""]);
     assert_eq!(log.iter().filter(|l| l.contains("Distance = 10.0000")).count(), 2, "{log:?}");
-
-    // CLose adds an arc back to the first point and ends: 20 + 15 pi.
-    let (s, log) = run(&["dist", "0,0", "m", "10,0", "10,10", "a", "cl"]);
-    assert!(has(&log, "Distance = 67.1239"), "{log:?}");
-    assert!(s.running.is_none(), "{}", s.prompt_text());
-
-    // CLose needs a second point.
-    let (s, log) = run(&["dist", "0,0", "m", "a", "cl"]);
-    assert!(has(&log, "CLose needs at least two points."), "{log:?}");
-    assert!(s.running.is_some());
-
-    // No arc continues the last segment to a point straight behind it.
-    for end in ["5,0", "cl"] {
-        let (s, log) = run(&["dist", "0,0", "m", "10,0", "a", end]);
-        assert!(has(&log, "Invalid arc endpoint."), "{end}: {log:?}");
-        assert!(s.prompt_text().contains("Specify endpoint of arc"), "{end}: {}", s.prompt_text());
-    }
 }
 
 #[test]
@@ -232,6 +220,10 @@ fn measuregeom_radius_measures_a_polyline_arc_segment() {
     s.cmdline("15,5").unwrap();
     assert!(has(&s.log, "Radius = 5.0000"), "{:?}", s.log);
     assert!(has(&s.log, "Diameter = 10.0000"), "{:?}", s.log);
+    // Fork: MEASUREGEOM returns to its options after a measurement (AutoCAD);
+    // Enter there ends it. Upstream ended the command after one measurement.
+    assert!(s.prompt_text().contains("Enter an option"), "{}", s.prompt_text());
+    s.cmdline("").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
     // The same pick from Tools > Inquiry > Radius, and the JSON form with the point on the arc.
@@ -248,8 +240,11 @@ fn measuregeom_radius_measures_a_polyline_arc_segment() {
 
 #[test]
 fn measuregeom_typed_asks_for_the_option_then_the_points() {
-    // Distance is the default option (#1103: typed, it used to fail asking for `p1`).
-    let (s, log) = run(&["measuregeom", "", "0,0", "3,4"]);
+    // Distance typed explicitly (#1103: typed, it used to fail asking for `p1`).
+    // Fork: MEASUREGEOM returns to its options after each measurement and Enter
+    // there ends it, so the exit Enter is part of the sequence (upstream's
+    // one-shot form took the default option on Enter and ended after one).
+    let (s, log) = run(&["measuregeom", "d", "0,0", "3,4", ""]);
     assert!(has(&log, "Distance = 5.0000"), "{log:?}");
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
@@ -270,30 +265,32 @@ fn measuregeom_angle_measures_an_arc_a_circle_two_lines_and_a_vertex() {
         s.log.clone()
     };
 
+    // Fork: each sequence ends with the Enter that leaves MEASUREGEOM's options
+    // (it returns there after every measurement, as AutoCAD does).
     // Arc: the angle between its endpoints about its center.
     let mut s = Session::new();
     s.execute("arc", &json!({"center": [0, 0], "radius": 2, "start": 0, "end": 270})).unwrap();
-    assert!(has(&typed(&mut s, &["measuregeom", "a", "-2,0"]), "Angle = 270.0000°"));
+    assert!(has(&typed(&mut s, &["measuregeom", "a", "-2,0", ""]), "Angle = 270.0000°"));
 
     // Circle: the pick on the circle and a second point, about the center.
-    let log = typed(&mut Session::new(), &["circle 0,0 2", "measuregeom", "a", "2,0", "0,5"]);
+    let log = typed(&mut Session::new(), &["circle 0,0 2", "measuregeom", "a", "2,0", "0,5", ""]);
     assert!(has(&log, "Angle = 90.0000°"), "{log:?}");
 
     // Two lines that do not meet, and two segments of one polyline.
     let mut s = Session::new();
     s.execute("line", &json!({"points": [[1, 0], [10, 0]]})).unwrap();
     s.execute("line", &json!({"points": [[0, 1], [5, 6]]})).unwrap();
-    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "2,3"]), "Angle = 45.0000°"), "{:?}", s.log);
+    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "2,3", ""]), "Angle = 45.0000°"), "{:?}", s.log);
     let mut s = Session::new();
     s.execute("pline", &json!({"vertices": [[0, 0], [10, 0], [10, 10]]})).unwrap();
-    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "10,5"]), "Angle = 90.0000°"), "{:?}", s.log);
+    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "10,5", ""]), "Angle = 90.0000°"), "{:?}", s.log);
     let mut s = Session::new();
     s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
     s.execute("line", &json!({"points": [[0, 5], [10, 5]]})).unwrap();
-    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "5,5"]), "The lines are parallel."), "{:?}", s.log);
+    assert!(has(&typed(&mut s, &["measuregeom", "a", "5,0", "5,5", ""]), "The lines are parallel."), "{:?}", s.log);
 
     // Enter: a vertex and two endpoints.
-    let log = typed(&mut Session::new(), &["measuregeom", "a", "", "0,0", "1,0", "-1,1"]);
+    let log = typed(&mut Session::new(), &["measuregeom", "a", "", "0,0", "1,0", "-1,1", ""]);
     assert!(has(&log, "Angle = 135.0000°"), "{log:?}");
 
     // Empty space is not an object, and the prompt stays.
@@ -335,13 +332,14 @@ fn area_of_an_ellipse_reports_its_exact_perimeter() {
 
 #[test]
 fn measuregeom_volume_multiplies_an_area_by_a_height() {
-    // Points: a 4 x 3 triangle's area is 6, times a height of 10.
-    let (s, log) = run(&["measuregeom", "v", "0,0", "4,0", "4,3", "", "10"]);
+    // Points: a 4 x 3 triangle's area is 6, times a height of 10. (Trailing "":
+    // fork MEASUREGEOM returns to its options after the measurement; Enter exits.)
+    let (s, log) = run(&["measuregeom", "v", "0,0", "4,0", "4,3", "", "10", ""]);
     assert!(has(&log, "Volume = 60.0000"), "{log:?}");
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
     // Object (the default): a 10 x 10 square polyline, height 2.
-    let (s, log) = run(&["rectang 0,0 10,10", "measuregeom", "v", "", "10,5", "2"]);
+    let (s, log) = run(&["rectang 0,0 10,10", "measuregeom", "v", "", "10,5", "2", ""]);
     assert!(has(&log, "Volume = 200.0000"), "{log:?}");
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
@@ -356,6 +354,7 @@ fn measuregeom_volume_multiplies_an_area_by_a_height() {
     assert!(s.prompt_text().contains("Specify second point"), "{}", s.prompt_text());
     s.cmdline("7,9").unwrap();
     assert!(has(&s.log, "Volume = 60.0000"), "{:?}", s.log);
+    s.cmdline("").unwrap();
     assert!(s.running.is_none(), "{}", s.prompt_text());
 
     // The JSON forms, by points and by handle.

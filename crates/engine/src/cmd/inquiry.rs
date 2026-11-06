@@ -736,6 +736,39 @@ pub(super) struct DistM {
     /// The bulge of the segment that starts at each point (the Arc option).
     bulges: Vec<f64>,
     arcs: arcs::Arcs,
+    /// The fork's DIST Arc option (AutoCAD DIST semantics, restored at the
+    /// 2026-11-06 upstream sync): 1 = waiting for the point on the arc,
+    /// 2 = for its end. Upstream's PLINE-style arc mode (`arcs`) stays in place
+    /// for AREA, whose tests agree with it; DIST's Arc in AutoCAD asks for a
+    /// point ON the arc, so the three-point form below is what DIST runs.
+    arc: u8,
+    arc_on: Option<Vec2>,
+}
+
+/// Bulge of the circular arc from `a` to `b` passing through `m`, in the DXF
+/// convention (tan(sweep/4); positive sweeps counter-clockwise). `None` when
+/// the three points are (near-)collinear: a straight segment.
+fn arc_bulge(a: Vec2, m: Vec2, b: Vec2) -> Option<f64> {
+    let d = 2.0 * (a.x * (m.y - b.y) + m.x * (b.y - a.y) + b.x * (a.y - m.y));
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let (a2, m2, b2) = (a.x * a.x + a.y * a.y, m.x * m.x + m.y * m.y, b.x * b.x + b.y * b.y);
+    let o = Vec2::new((a2 * (m.y - b.y) + m2 * (b.y - a.y) + b2 * (a.y - m.y)) / d, (a2 * (b.x - m.x) + m2 * (a.x - b.x) + b2 * (m.x - a.x)) / d);
+    let ang = |v: Vec2| v.y.atan2(v.x);
+    let tau = std::f64::consts::TAU;
+    let mut ccw = ang(b - o) - ang(a - o);
+    while ccw <= 0.0 {
+        ccw += tau;
+    }
+    let mut tm = ang(m - o) - ang(a - o);
+    while tm < 0.0 {
+        tm += tau;
+    }
+    // The arc through m sweeps counter-clockwise when m lies on the CCW arc a→b.
+    let sweep = if tm <= ccw { ccw } else { ccw - tau };
+    let b = (sweep / 4.0).tan();
+    b.is_finite().then_some(b)
 }
 
 /// Total length of the segments through `pts`, each with its bulge in `bulges`.
@@ -796,6 +829,13 @@ impl Interactive for DistM {
         if self.length {
             return length_prompt();
         }
+        // Fork DIST Arc stages (see the `arc` field): a point on the arc, then its end.
+        if self.arc == 1 {
+            return Prompt::new("Specify point on arc", Accept::POINT).base_opt(self.multi.as_ref().and_then(|p| p.last().copied()));
+        }
+        if self.arc == 2 {
+            return Prompt::new("Specify end point of arc", Accept::POINT);
+        }
         if let Some(p) = self.multi.as_deref().and_then(|pts| self.arcs.prompt(s, pts, &self.bulges, "")) {
             return p;
         }
@@ -813,6 +853,31 @@ impl Interactive for DistM {
     }
     fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
         if let Some(pts) = &mut self.multi {
+            // Fork DIST Arc stages: collect the point on the arc, then its end,
+            // and fold the three-point arc into the path as a bulge segment.
+            if self.arc > 0 {
+                match i {
+                    Input::Point(p) => {
+                        if self.arc == 1 {
+                            self.arc_on = Some(p);
+                            self.arc = 2;
+                        } else if let (Some(a), Some(m)) = (pts.last().copied(), self.arc_on.take()) {
+                            let b = arc_bulge(a, m, p).unwrap_or(0.0);
+                            arcs::push(pts, &mut self.bulges, p, b);
+                            self.sources.push(s.picked_viewport);
+                            self.arc = 0;
+                            let model = model_points(&self.sources);
+                            s.echo(format!("Distance = {}", fmt_d(s, path_len(model.as_deref().unwrap_or(pts), &self.bulges))));
+                        }
+                    }
+                    Input::Enter => {
+                        self.arc = 0;
+                        self.arc_on = None;
+                    }
+                    _ => {}
+                }
+                return Ok(Step::Continue);
+            }
             if self.length {
                 let model = model_points(&self.sources);
                 if let Some(p) = length_input(model.as_deref().unwrap_or(pts), &self.bulges, i)? {
@@ -869,6 +934,9 @@ impl Interactive for DistM {
                     self.sources.pop();
                 }
                 Input::Keyword(k) if k == "Length" => self.length = true,
+                // Fork: DIST's Arc is the three-point arc (see the `arc` field), not
+                // upstream's PLINE-style arc mode, so it never reaches `arcs.keyword`.
+                Input::Keyword(k) if k == "Arc" => self.arc = 1,
                 Input::Keyword(k) if k == "Total" => return self.total(s, false),
                 Input::Keyword(k) if k == "CLose" && self.arcs.on => {
                     self.arcs.close(pts, &mut self.bulges)?;

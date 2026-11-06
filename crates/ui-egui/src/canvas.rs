@@ -418,35 +418,8 @@ fn paint_content_highlights(frame: &mut CanvasPaint<'_>, bg: Rgb, sel: &[Handle]
         }
         draw_list(&painter.with_clip_rect(clip), &xf, &app.canvas.only.list, bg, app.session.settings.lwdisplay);
     } else {
-        if let Some(f) = ensure_vp_content(app, &xf_paper, ui.ctx()) {
-            // Basemap tiles inside the active viewport (paper space, §9): under
-            // its vector contents, clipped to the viewport, with the viewport's
-            // own model-to-screen transform. A clipped viewport's outline mask
-            // covers vectors only, so it gets no basemap.
-            if f.outline.is_none()
-                && let Ok(doc) = app.session.doc()
-            {
-                let vp_painter = painter.with_clip_rect(f.on_screen.intersect(rect));
-                let xf_vp = Xf { rect: f.on_screen, center: f.xf.to_world(f.on_screen.center()), scale: f.xf.scale, twist: f.xf.twist };
-                crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &vp_painter, &xf_vp, ui.ctx());
-            }
-            let gpu = app.canvas.gpu.is_some();
-            let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
-            draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, &xf_paper, bg, app.session.settings.lwdisplay);
-            masked = gpu && f.outline.is_some();
-        }
-        // Basemap tiles under the vectors: model space through the canvas view;
-        // paper space inside each layout viewport (each with its own view), never
-        // on the sheet itself. Missing tiles stay blank until the background
-        // fetcher lands them (§9.4).
-        if let Ok(doc) = app.session.doc() {
-            let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
-            if sheet.is_none() {
-                crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &painter, &xf_paper, ui.ctx());
-            } else {
-                draw_layout_viewport_tiles(&app.session, &mut app.canvas.tilemap, doc, &painter, &xf_paper, rect, ui.ctx());
-            }
-        }
+        masked = draw_active_viewport(app, &xf_paper, painter, rect, ui.ctx(), bg);
+        draw_basemap(app, painter, &xf_paper, rect, ui.ctx());
         if app.canvas.gpu.is_some() {
             draw_list_gpu(&mut app.canvas, painter, &xf_paper, bg, app.session.settings.lwdisplay);
         } else if let Some(list) = &app.canvas.list {
@@ -803,6 +776,43 @@ fn collect_prompt_clicks(app: &mut CadApp, ui: &egui::Ui, context: PromptClickCo
 }
 
 /// Draw the drawing area and handle its input (zoom and pan, picking, the crosshair) for this
+/// The active layout viewport's contents (paper space): its basemap tiles
+/// first (fork, §9 — under its vector contents, clipped to the viewport, with
+/// the viewport's own model-to-screen transform; a clipped viewport's outline
+/// mask covers vectors only, so it gets no basemap), then the vectors
+/// themselves. Returns `masked`: the outline is in the stencil buffer this
+/// frame. Split out of [`show`] for the cognitive-complexity gate.
+fn draw_active_viewport(app: &mut CadApp, xf_paper: &Xf, painter: &egui::Painter, rect: Rect, ctx: &egui::Context, bg: Rgb) -> bool {
+    let Some(f) = ensure_vp_content(app, xf_paper, ctx) else { return false };
+    if f.outline.is_none()
+        && let Ok(doc) = app.session.doc()
+    {
+        let vp_painter = painter.with_clip_rect(f.on_screen.intersect(rect));
+        let xf_vp = Xf { rect: f.on_screen, center: f.xf.to_world(f.on_screen.center()), scale: f.xf.scale, twist: f.xf.twist };
+        crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, &vp_painter, &xf_vp, ctx);
+    }
+    let gpu = app.canvas.gpu.is_some();
+    let clipped = painter.with_clip_rect(f.on_screen.intersect(rect));
+    draw_vp_content(&mut app.canvas.vp, gpu, &clipped, &f, xf_paper, bg, app.session.settings.lwdisplay);
+    gpu && f.outline.is_some()
+}
+
+/// Basemap tiles under the vectors (fork, §9): model space through the canvas
+/// view; paper space inside each layout viewport (each with its own view),
+/// never on the sheet itself. Missing tiles stay blank until the background
+/// fetcher lands them (§9.4). Split out of [`show`] for the
+/// cognitive-complexity gate.
+fn draw_basemap(app: &mut CadApp, painter: &egui::Painter, xf_paper: &Xf, rect: Rect, ctx: &egui::Context) {
+    if let Ok(doc) = app.session.doc() {
+        let sheet = app.canvas.list.as_ref().and_then(|l| l.sheet);
+        if sheet.is_none() {
+            crate::tiles::draw_tilemap(&mut app.canvas.tilemap, doc, painter, xf_paper, ctx);
+        } else {
+            draw_layout_viewport_tiles(&app.session, &mut app.canvas.tilemap, doc, painter, xf_paper, rect, ctx);
+        }
+    }
+}
+
 /// frame.
 ///
 /// It also owns the cursor-visibility contract: the OS cursor is hidden only while the pointer is
@@ -881,35 +891,7 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     let pressed_primary =
         collect_prompt_clicks(app, ui, PromptClickContext { rect, xf, inside, middle_down, primary_clicked: pressed_primary, response: &resp });
 
-    // Freehand trim/extend: while TRIM/EXTEND waits for picks, a primary drag lays down a
-    // trim path instead of placing points or opening a window; the path is fed whole on
-    // release. A press that never really moves stays a click (handled as usual below).
-    let drag_trimming = app.session.drag_trim_active() && app.cmd.options.is_none() && app.cmd.buffer.is_empty();
-    if drag_trimming
-        && inside
-        && !middle_down
-        && resp.drag_started_by(egui::PointerButton::Primary)
-        && let Some(origin) = ui.input(|i| i.pointer.press_origin()).filter(|o| rect.contains(*o))
-    {
-        app.canvas.drag_trim = Some(vec![xf.to_world(origin)]);
-    }
-    if let (Some(path), Some(pos)) = (app.canvas.drag_trim.as_mut(), hover_pos) {
-        drag_path_push(path, xf.to_world(pos), 2.0 / scale.max(1e-12));
-    }
-    let mut drag_path_done: Option<Vec<Vec2>> = None;
-    if app.canvas.drag_trim.is_some()
-        && resp.drag_stopped_by(egui::PointerButton::Primary)
-        && let Some(path) = app.canvas.drag_trim.take()
-        && drag_path_is_drag(&path, scale, 8.0)
-    {
-        drag_path_done = Some(path);
-    }
-    if let Some(path) = &drag_path_done
-        && let Err(e) = app.session.input(Input::DragPath(path.clone()))
-    {
-        app.session.echo(e.to_string());
-    }
-
+    let drag_path_done = update_drag_trim(app, ui, &resp, &xf, inside, middle_down, hover_pos);
     let (raw_world, dyn_frame) = update_canvas_cursor(app, ui, &xf, inside, hover_pos);
 
     // A click on the Dynamic Input options menu picks the keyword; elsewhere it closes the menu.
@@ -1602,7 +1584,6 @@ fn draw_layout_viewport_tiles(
     }
 }
 
-
 /// The tiles other than the current one (each with its own view, clipped to it), then the
 /// tile borders: thin, and heavy around the current tile.
 fn draw_tiles(app: &mut CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::ModelTile)]) {
@@ -1630,9 +1611,51 @@ fn draw_tiles(app: &mut CadApp, ui: &egui::Ui, tiles: &[(Rect, cadcraft_engine::
     }
 }
 
-
 /// Append `p` to a freehand drag path when it moved at least `min_step` world units from
 /// the last point: a slow drag must not flood the fence with near-duplicates.
+/// Freehand trim/extend (fork): while TRIM/EXTEND waits for picks, a primary
+/// drag lays down a trim path instead of placing points or opening a window;
+/// the path is fed whole on release. A press that never really moves stays a
+/// click (handled as usual by the caller). Returns the finished path, if any.
+/// Split out of [`show`] for the cognitive-complexity gate.
+fn update_drag_trim(
+    app: &mut CadApp,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    xf: &Xf,
+    inside: bool,
+    middle_down: bool,
+    hover_pos: Option<Pos2>,
+) -> Option<Vec<Vec2>> {
+    let scale = xf.scale;
+    let drag_trimming = app.session.drag_trim_active() && app.cmd.options.is_none() && app.cmd.buffer.is_empty();
+    if drag_trimming
+        && inside
+        && !middle_down
+        && resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin()).filter(|o| xf.rect.contains(*o))
+    {
+        app.canvas.drag_trim = Some(vec![xf.to_world(origin)]);
+    }
+    if let (Some(path), Some(pos)) = (app.canvas.drag_trim.as_mut(), hover_pos) {
+        drag_path_push(path, xf.to_world(pos), 2.0 / scale.max(1e-12));
+    }
+    let mut drag_path_done: Option<Vec<Vec2>> = None;
+    if app.canvas.drag_trim.is_some()
+        && resp.drag_stopped_by(egui::PointerButton::Primary)
+        && let Some(path) = app.canvas.drag_trim.take()
+        && drag_path_is_drag(&path, scale, 8.0)
+    {
+        drag_path_done = Some(path);
+    }
+    if let Some(path) = &drag_path_done
+        && let Err(e) = app.session.input(Input::DragPath(path.clone()))
+    {
+        app.session.echo(e.to_string());
+    }
+    drag_path_done
+}
+
 fn drag_path_push(path: &mut Vec<Vec2>, p: Vec2, min_step: f64) {
     if path.last().is_none_or(|l| l.dist(p) >= min_step) {
         path.push(p);

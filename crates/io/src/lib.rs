@@ -31,8 +31,8 @@ use cadcraft_doc::{Drawing, Space};
 use cadcraft_geom::Bounds2;
 use std::path::{Path, PathBuf};
 
-pub use cadcraft_doc::{OpenProgress, OpenStage};
 pub use cadcraft_doc::Format;
+pub use cadcraft_doc::{OpenProgress, OpenStage};
 pub use cadcraft_dxf::Version;
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::entity_groups;

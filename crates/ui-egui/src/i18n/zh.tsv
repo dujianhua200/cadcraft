@@ -1498,7 +1498,6 @@ menu	View	视图
 	Specify total length or	Specify total length or
 	Text inside a block cannot be edited here. Enter the block editor to edit it.	块内文字不能在此编辑，请进入块编辑后再编辑。
 	Text on a locked layer cannot be edited. Unlock the layer first.	文字所在图层已锁定，无法编辑。请先解锁图层。
-	WCS ⌄	WCS ⌄
 	The object is outside the reference-edit working set and cannot be edited.	该对象不在参照编辑工作集内，无法编辑。
 	Entered model space (MSPACE). Double-click the object again to edit it.	已进入模型空间（MSPACE），请再次双击要编辑的对象。
 	Opened the Properties panel for the dimension. Edit its text override and style there.	已打开标注的属性面板，可在此编辑其文字替代与样式。
@@ -1542,3 +1541,13 @@ menu	View	视图
 	File loaded. Fill in the attribution, then press Import.	文件已载入。请填写署名，然后点“导入”。
 	Could not read that file.	无法读取该文件。
 	Map source applied	图源已应用
+	Backup copies are off, so the current file will be replaced.	备份副本已关闭，当前文件将被替换。
+	DXF 2010 and earlier keep them. Use Save As to keep them in the drawing.	DXF 2010 及更早版本会保留它们。使用“另存为”将其保留在图纸中。
+	DXF keeps them. Use Save As to keep them in the drawing.	DXF 会保留它们。使用“另存为”将其保留在图纸中。
+	Save Anyway	仍然保存
+	Save cancelled: {path} was not changed.	保存已取消：{path} 未被更改。
+	Saving {name} will remove content	保存 {name} 将移除内容
+	The current file doesn't look whole, so {name} stays as it is and the current file will be replaced.	当前文件似乎不完整，因此 {name} 保持原样，当前文件将被替换。
+	The current file is kept as {name} until the next save.	当前文件在下次保存前保留为 {name}。
+	This format can't keep these objects yet: {objects}.	此格式尚无法保留这些对象：{objects}。
+	{count} more types	还有 {count} 种类型

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-06
+
+### Changed
+
+- **Upstream sync (first)**: merged `storytold/cadcraft` upstream up to its
+  0.17.0-era `main` (918 commits since this fork's 0.6.2-era fork point) —
+  engine submodule split with interactive prompt machines for most commands,
+  DIST/AREA arc mode, PDF plot output, egui 0.37, chrono-based date/time,
+  SHX font reading, XCLIP, HATCHEDIT boundary editing, AUDITCTL, web page
+  host mode and more UI languages. All fork features are retained: Chinese
+  UI, SimSun/Songti SC font policy, OLE/EMF previews, the online-map tile
+  basemap with the map-source manager, the OviMap link, the AutoLISP
+  extensions (GBK sources, DCL dialogs, vlax subset) and the parity-audit
+  command prompt streams. Upstream's self-update is disabled in this fork
+  (it would offer upstream builds); updates ship through this repository's
+  own Releases. See `docs/upstream-sync.md`.
+- Automated upstream tracking: `.github/workflows/sync-upstream.yml` now
+  merges upstream weekly — clean merges with a green gate are released
+  automatically (patch version bump, “上游同步” in the release notes);
+  conflicts stop at a PR for a human. Releases now contain exactly the
+  macOS universal DMG, the Windows x64 MSI and SHA256SUMS.txt.
+
 ## [0.10.4] - 2026-10-23
 
 ### Fixed
