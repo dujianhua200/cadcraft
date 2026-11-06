@@ -340,7 +340,17 @@ impl TileFetcher {
     /// an in-flight tile is skipped without back-off so it decodes promptly
     /// when its bytes land).
     pub fn is_pending(&self, layer: &TileLayer, tile: &TileRef) -> bool {
-        poisoned(self.inner.in_flight.lock()).contains(&tile_cache_rel_path(layer, tile))
+        // On the web nothing is ever queued (see `request`), so nothing is pending;
+        // the cache-path helper is native-only.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = (layer, tile);
+            false
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            poisoned(self.inner.in_flight.lock()).contains(&tile_cache_rel_path(layer, tile))
+        }
     }
 
     /// Whether a worker finished a tile since the last call (the canvas
