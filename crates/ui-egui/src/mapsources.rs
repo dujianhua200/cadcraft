@@ -246,7 +246,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     };
     let mut commit = false;
     let mut cancel = false;
-    egui::Window::new(crate::tl!("Map Sources…")).id(egui::Id::new("map_sources")).open(open).resizable(true).default_size(egui::vec2(680.0, 540.0)).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Map Sources…")).id(egui::Id::unique("map_sources")).open(open).resizable(true).default_size(egui::vec2(680.0, 540.0)).show(ctx, |ui| {
         ui.label(crate::tl!("Tile sources for the online map. Only OpenStreetMap and CARTO are built in; add your own source only if you have the right to use it. Attribution is mandatory and is shown verbatim."));
         ui.add_space(6.0);
         // The source list: name / coordinate type / max zoom; the current

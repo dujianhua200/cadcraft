@@ -86,7 +86,7 @@ pub fn dialog(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) {
     let error = draft.error.clone();
     let mut confirm = false;
     let mut cancel = false;
-    egui::Window::new(crate::tl!("Online Map")).id(egui::Id::new("basemap_georef")).open(open).resizable(false).show(ctx, |ui| {
+    egui::Window::new(crate::tl!("Online Map")).id(egui::Id::unique("basemap_georef")).open(open).resizable(false).show(ctx, |ui| {
         ui.label(crate::tl!("The drawing has no geographic reference. Confirm the map centre below to align the online map."));
         ui.add_space(8.0);
         ui.horizontal(|ui| {

@@ -1,0 +1,197 @@
+name: "Sync upstream"
+
+# Fork automation (dujianhua200/cadcraft): keep this fork current with
+# storytold/cadcraft without giving up the fork's own features.
+#
+# Weekly (and on manual dispatch) this workflow merges upstream/main into the
+# staging branch `sync/auto-upstream`:
+#
+#   * Clean merge + `cargo xtask ci` green  →  the merge lands on `main`, the
+#     patch version is bumped, `main` is pushed to the `release` branch and the
+#     Release workflow is dispatched with publish=true, so the new version is
+#     built (macOS DMG + Windows x64 MSI + SHA256SUMS.txt only) and PUBLISHED
+#     automatically, with “上游同步” noted in the release notes.
+#   * Merge conflict, red CI, or a merge that touches `.github/workflows/**`
+#     (the workflow token cannot push those)  →  the staging branch is pushed
+#     and a PR is opened for a human. Nothing is ever force-pushed.
+#
+# Note on tokens: pushes made with GITHUB_TOKEN do not start workflow runs —
+# except workflow_dispatch, which is why the release is dispatched explicitly
+# instead of relying on the push to the `release` branch.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream/main
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        id: fetch
+        run: |
+          git remote add upstream https://github.com/storytold/cadcraft.git
+          git fetch upstream main
+          git fetch origin main release sync/auto-upstream || true
+          if git merge-base --is-ancestor upstream/main origin/main; then
+            echo "upstream/main is already contained in main; nothing to sync."
+            echo "todo=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "todo=true" >> "$GITHUB_OUTPUT"
+            echo "upstream_new=$(git rev-list --count origin/main..upstream/main)" >> "$GITHUB_OUTPUT"
+            echo "upstream_sha=$(git rev-parse --short upstream/main)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream/main into the staging branch
+        id: merge
+        if: steps.fetch.outputs.todo == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B sync/auto-upstream origin/main
+          if git merge --no-edit --no-ff upstream/main -m "Merge upstream/main (storytold/cadcraft) — automated sync"; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+            echo "### Merge conflicts" >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/conflicts.txt >> "$GITHUB_STEP_SUMMARY"
+            git merge --abort
+          fi
+
+      - name: Open a PR for a conflicted merge and stop
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push --force-with-lease origin sync/auto-upstream
+          BODY=$(printf 'Automated upstream sync hit merge conflicts and stopped for a human.\n\nConflicted files:\n\n```\n%s\n```\n\nResolve them on this branch (fork features win where they conflict with upstream refactors; see docs/upstream-sync.md), then merge this PR. Nothing was pushed to main.' "$(cat /tmp/conflicts.txt)")
+          gh pr create --base main --head sync/auto-upstream \
+            --title "上游同步：合并冲突，需人工处理" --body "$BODY" \
+            || gh pr comment sync/auto-upstream --body "$BODY" || true
+          exit 1
+
+      - name: Stop for a human if the merge touches workflow files
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true'
+        id: wfcheck
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --name-only origin/main..HEAD -- .github/workflows/ | grep -q .; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            git push --force-with-lease origin sync/auto-upstream
+            gh pr create --base main --head sync/auto-upstream \
+              --title "上游同步：涉及 workflow 文件，需人工推送" \
+              --body "Automated upstream sync merged cleanly, but the merge changes \`.github/workflows/**\`, which the workflow token is not allowed to push. Review and merge this PR from an account with workflows permission (or push the branch with the fork's PAT tooling), then dispatch the Release workflow manually if a release is wanted." \
+              || true
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out craft-fonts (same ref as ci.yml / release.yml)
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false'
+        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        with:
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false'
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false'
+        with:
+          key: sync-upstream
+
+      - name: Quality gate (cargo xtask ci)
+        id: gate
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false'
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+        run: |
+          if cargo xtask ci; then
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "green=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a PR for a red gate and stop
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false' && steps.gate.outputs.green == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push --force-with-lease origin sync/auto-upstream
+          gh pr create --base main --head sync/auto-upstream \
+            --title "上游同步：CI 未通过，需人工处理" \
+            --body "Automated upstream sync merged cleanly, but \`cargo xtask ci\` failed on the merged tree (see the workflow run log). Fix on this branch, then merge this PR. Nothing was pushed to main." \
+            || gh pr comment sync/auto-upstream --body "cargo xtask ci still failing on the latest automated sync attempt; see the newest Sync upstream run." || true
+          exit 1
+
+      - name: Land on main, bump patch version, push main + release
+        id: land
+        if: steps.fetch.outputs.todo == 'true' && steps.merge.outputs.clean == 'true' && steps.wfcheck.outputs.touched == 'false' && steps.gate.outputs.green == 'true'
+        run: |
+          CUR=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([0-9]+)\.([0-9]+)\.([0-9]+)".*/\1.\2.\3/')
+          NEXT=$(echo "$CUR" | awk -F. '{printf "%d.%d.%d", $1, $2, $3+1}')
+          echo "version bump: $CUR -> $NEXT"
+          git checkout -B main sync/auto-upstream
+          cargo xtask version set "$NEXT"
+          git add -A
+          git commit -m "chore(release): v$NEXT (upstream sync)"
+          git push origin main
+          git push origin main:release
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch the Release workflow (publish)
+        if: steps.land.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Token pushes do not trigger the push-triggered Release run; dispatch
+          # is the supported exception and carries publish=true.
+          gh workflow run release.yml --ref release -f publish=true
+          sleep 30
+          RUN_ID=$(gh run list --workflow release.yml --branch release --event workflow_dispatch --limit 5 \
+            --json databaseId,headSha --jq ".[] | select(.headSha == \"$(git rev-parse origin/release)\") | .databaseId" | head -1)
+          echo "release_run=$RUN_ID" >> "$GITHUB_ENV"
+          if [ -n "$RUN_ID" ]; then gh run watch "$RUN_ID" --exit-status; fi
+
+      - name: Mark the release as an upstream sync
+        if: steps.land.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.land.outputs.version }}
+          UPSTREAM_SHA: ${{ steps.fetch.outputs.upstream_sha }}
+          UPSTREAM_NEW: ${{ steps.fetch.outputs.upstream_new }}
+        run: |
+          for i in $(seq 1 20); do
+            ID=$(gh api "repos/${{ github.repository }}/releases/tags/v${VERSION}" --jq .id 2>/dev/null || true)
+            [ -n "$ID" ] && [ "$ID" != "null" ] && break
+            sleep 30
+          done
+          BODY=$(gh api "repos/${{ github.repository }}/releases/$ID" --jq .body)
+          NOTE=$(printf '上游同步：本版本由自动同步流程发布，合并 storytold/cadcraft 上游更新至 %s（新增 %s 个提交），并保留本 fork 的自有改造（汉化、宋体字体、图源/GIS、AutoLISP、OLE/EMF 等）。资产仅含 macOS DMG 与 Windows x64 MSI。\n\n---\n\n%s' "$UPSTREAM_SHA" "$UPSTREAM_NEW" "$BODY")
+          gh api --method PATCH "repos/${{ github.repository }}/releases/$ID" -f body="$NOTE"
+          {
+            echo "### Upstream sync published"
+            echo "- Version: v$VERSION"
+            echo "- Upstream: $UPSTREAM_SHA ($UPSTREAM_NEW new commits)"
+          } >> "$GITHUB_STEP_SUMMARY"

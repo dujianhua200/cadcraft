@@ -22,11 +22,11 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("text_editor_state")
+    egui::Id::unique("text_editor_state")
 }
 
 fn edit_id() -> egui::Id {
-    egui::Id::new("text_editor_text")
+    egui::Id::unique("text_editor_text")
 }
 
 /// Show the editor while TEXTEDIT collects a TEXT's value; clears its state when it isn't running.
@@ -54,7 +54,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
         pos2(at.x.clamp(rect.left(), (rect.right() - width - 8.0).max(rect.left())), at.y.clamp(rect.top(), (rect.bottom() - 90.0).max(rect.top())));
 
     let mut done = Done::No;
-    egui::Area::new(egui::Id::new("text_editor_area")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("text_editor_area")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::NONE.fill(tk.panel).stroke(Stroke::new(1.0, tk.accent)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
             ui.set_width(width);
             let out = egui::TextEdit::singleline(&mut st.buf)

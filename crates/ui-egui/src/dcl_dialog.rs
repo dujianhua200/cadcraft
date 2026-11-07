@@ -25,7 +25,7 @@ struct State {
 }
 
 fn state_id() -> egui::Id {
-    egui::Id::new("dcl_dialog_state")
+    egui::Id::unique("dcl_dialog_state")
 }
 
 /// Show the dialog a LISP routine waits on, if any.
@@ -43,7 +43,7 @@ pub fn show(app: &mut CadApp, ctx: &egui::Context) {
     let mut pressed: Option<String> = None;
     let mut dismiss = false;
     egui::Window::new(title)
-        .id(egui::Id::new(("dcl_dialog", view.name.clone())))
+        .id(egui::Id::unique(("dcl_dialog", view.name.clone())))
         .collapsible(false)
         .resizable(true)
         .default_width(420.0)
@@ -214,7 +214,7 @@ fn render_tile(
                 if !t.label.is_empty() {
                     ui.label(&t.label);
                 }
-                let r = ui.add_enabled(on, egui::TextEdit::singleline(&mut v).id(egui::Id::new(("dcl_edit", t.key.clone()))).desired_width(180.0));
+                let r = ui.add_enabled(on, egui::TextEdit::singleline(&mut v).id(egui::Id::unique(("dcl_edit", t.key.clone()))).desired_width(180.0));
                 if r.changed() {
                     st.edits.insert(t.key.clone(), v);
                 }
@@ -283,7 +283,7 @@ fn render_tile(
                     ui.label(&t.label);
                 }
                 let shown = list.get(sel).cloned().unwrap_or_default();
-                egui::ComboBox::from_id_salt(("dcl_popup", t.key.clone())).selected_text(shown).show_ui(ui, |ui| {
+                craft_ui::ComboBox::from_id_salt(("dcl_popup", t.key.clone())).selected_text(shown).show_ui(ui, |ui| {
                     for (i, item) in list.iter().enumerate() {
                         if ui.add_enabled_ui(on, |ui| ui.selectable_label(sel == i, item)).inner.clicked() {
                             sel = i;

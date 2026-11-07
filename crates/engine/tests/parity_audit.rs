@@ -114,5 +114,10 @@ fn audit_dump() {
         s.cancel();
     }
     let errs = out.lines().filter(|l| l.contains("\tstart: ERR")).count();
-    assert!(errs <= 73, "typed-name errors grew past the audited remainder: {errs} > 73");
+    // Baseline 73 from the 2026-10-22 audit; +3 at the 2026-11-06 upstream sync,
+    // each verified as a command registered only after the fork point and
+    // erroring for the same audited reasons (a programming surface that needs
+    // its parameters / session state): `compareexport`, `imageattach`,
+    // `layout.saveas`. The FIXED_WHEN_TYPED assertions above are unchanged.
+    assert!(errs <= 76, "typed-name errors grew past the audited remainder: {errs} > 76");
 }

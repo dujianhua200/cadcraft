@@ -36,10 +36,13 @@ fn area_object_add_and_subtract_keep_a_running_total() {
 #[test]
 fn area_arc_keyword_starts_an_arc_and_length_extends_the_last_segment() {
     // "a" resolves to the Arc keyword. It used to land in the "not available yet"
-    // catch-all despite being advertised; the parity audit implemented it, so it
-    // now moves to the on-arc point prompt (every advertised AREA keyword works).
+    // catch-all despite being advertised; the parity audit implemented it, and the
+    // upstream merge replaced the through-point arc with PLINE-style arc mode, so
+    // it now moves to the arc-endpoint prompt (every advertised AREA keyword works).
+    // (This file is upstream's `tests/it/inquiry_keywords.rs` predecessor, kept with
+    // its tests; the `it` copy carries the fuller arc-mode coverage.)
     let (s, _log) = run(&["area", "0,0", "a"]);
-    assert!(s.prompt_text().contains("point on arc"), "{}", s.prompt_text());
+    assert!(s.prompt_text().contains("endpoint of arc"), "{}", s.prompt_text());
     assert!(s.running.is_some());
     // Length continues along the previous segment: 0,0 -> 4,0 -> +6 -> 10,0, then 10,10.
     let (_, log) = run(&["area", "0,0", "4,0", "l", "6", "10,10", ""]);

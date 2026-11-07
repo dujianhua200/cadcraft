@@ -983,7 +983,10 @@ fn round_rect_loop(rect: Bounds2, corner: Vec2) -> Vec<Vec2> {
 }
 
 /// Dispatch one record. Unknown and raster records are skipped by falling through.
-#[allow(clippy::too_many_lines)]
+/// (Fork module: upstream's `cognitive_complexity` lint postdates this dispatcher;
+/// it is one flat match over EMF record types by design, like the record table in
+/// the EMF spec — splitting it would scatter each record's decode across helpers.)
+#[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
 fn handle_record(rec: &[u8], ty: u32, dc: &mut Dc, out: &mut Out, dpi: (f64, f64)) {
     match ty {
         // ---- state ----
