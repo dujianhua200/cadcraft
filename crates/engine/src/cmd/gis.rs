@@ -19,7 +19,7 @@ use cadcraft_doc::{Common, Drawing, EntityKind, Handle, Space};
 use serde_json::{Value, json};
 
 use super::file::{base64_decode, base64_encode, io};
-use super::*;
+use super::{CommandSpec, bad, f64_req, str_param};
 use crate::{Accept, EngineError, Input, Interactive, Prompt, Result, Session, Step};
 
 pub fn specs() -> Vec<CommandSpec> {

@@ -108,7 +108,7 @@ pub fn viewport_tile_xf(xf_paper: &Xf, vp_center: Vec2, vp_height: f64, view_cen
         return None;
     }
     let center = view_center + (xf_paper.center - vp_center) / s;
-    let xf = Xf { rect: xf_paper.rect, center, scale: xf_paper.scale * s };
+    let xf = Xf { rect: xf_paper.rect, center, scale: xf_paper.scale * s, twist: xf_paper.twist };
     (xf.center.is_finite() && xf.scale.is_finite() && xf.scale > 0.0).then_some(xf)
 }
 
@@ -289,7 +289,7 @@ mod tests {
         let layer = TileLayer::default_osm();
         let georef = GeoRef::centred(32.1301, 114.0814);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
-        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18 };
+        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18, twist: 0.0 };
         let bounds = xf.world_bounds();
         let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
         assert!(!placements.is_empty());
@@ -344,7 +344,7 @@ mod tests {
         let layer = TileLayer::default_osm();
         let georef = GeoRef::centred(32.1301, 114.0814);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
-        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18 };
+        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18, twist: 0.0 };
         let bounds = xf.world_bounds();
         let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
         assert!(placements.len() > 4, "the test view must span several tiles, got {}", placements.len());
@@ -388,7 +388,7 @@ mod tests {
         let layer = TileLayer::default_osm();
         let georef = GeoRef::centred(32.1301, 114.0814);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
-        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18 };
+        let xf = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 0.18, twist: 0.0 };
         let bounds = xf.world_bounds();
         let placements = tile_placements(&layer, bounds.min, bounds.max, &georef, None).unwrap_or_default();
         assert!(!placements.is_empty());
@@ -444,7 +444,7 @@ mod tests {
         // Paper: centre (100, 100), 2 px per unit. Viewport: paper centre
         // (100, 100), 50 tall, showing model centre (0, 0), 100 tall.
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0));
-        let xf_paper = crate::canvas::Xf { rect, center: Vec2::new(100.0, 100.0), scale: 2.0 };
+        let xf_paper = crate::canvas::Xf { rect, center: Vec2::new(100.0, 100.0), scale: 2.0, twist: 0.0 };
         let xf = viewport_tile_xf(&xf_paper, Vec2::new(100.0, 100.0), 50.0, Vec2::ZERO, 100.0).expect("a valid viewport maps");
         assert!((xf.scale - 1.0).abs() < 1e-9, "scale = paper scale × (50 / 100)");
         // A model point maps through the viewport exactly as through paper:
@@ -474,8 +474,8 @@ mod tests {
         // up to 512 tiles per view, so a zoomed-out view alone would already
         // trip the cache's wholesale clear.)
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 200.0));
-        let xf1 = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 200.0 };
-        let xf2 = crate::canvas::Xf { rect, center: Vec2::new(50_000.0, 0.0), scale: 200.0 };
+        let xf1 = crate::canvas::Xf { rect, center: Vec2::ZERO, scale: 200.0, twist: 0.0 };
+        let xf2 = crate::canvas::Xf { rect, center: Vec2::new(50_000.0, 0.0), scale: 200.0, twist: 0.0 };
         let mut all = std::collections::HashSet::new();
         for xf in [&xf1, &xf2] {
             let bounds = xf.world_bounds();
