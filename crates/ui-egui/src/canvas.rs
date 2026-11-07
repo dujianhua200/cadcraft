@@ -1253,8 +1253,8 @@ fn paint_canvas(frame: CanvasPaint<'_>) {
     );
 }
 
-/// Start TEXTEDIT on the text, mtext or attribute definition at `p` (the objects its shortcut menu
-/// offers Edit Text for); false when there is none. A dimension at `p` opens its Properties
+/// Start TEXTEDIT on the text, mtext, attribute definition or multileader text at `p` (the objects
+/// its shortcut menu offers Edit Text for, and multileaders, #1081); false when there is none. A dimension at `p` opens its Properties
 /// panel instead (a dimension has no in-place editor; TEXTEDIT's command-line prompt would
 /// still take its text, but the panel is where its style and overrides live).
 ///
@@ -1273,6 +1273,17 @@ fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
         };
         match &e.kind {
             EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) => {
+                if locked_hint(app, h, &e) {
+                    return true;
+                }
+                app.start("textedit");
+                if let Err(e) = app.session.input(Input::Point(p)) {
+                    app.session.echo(e.to_string());
+                }
+                true
+            }
+            // A multileader's text opens in the same in-place editor (#1081, via upstream).
+            EntityKind::MLeader(m) if m.text.is_some() => {
                 if locked_hint(app, h, &e) {
                     return true;
                 }
