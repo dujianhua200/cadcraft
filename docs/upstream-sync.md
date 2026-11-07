@@ -100,3 +100,48 @@ and upstream's tests were adapted, with the divergence noted in the tests:
 - **TEXTEDIT IME**: with the fork's in-place editor open, the editor's
   text field owns the IME; upstream's two IME tests were adapted to that
   interaction (composition/commit land in the editor, applied on Enter).
+
+## 2026-11-07: incremental sync (the 0.11.0 release baseline)
+
+Before 0.11.0 shipped, the sync branch took one more upstream increment:
+49 commits (`3b7eb1b7` → `865fa9af`, upstream/main as of 2026-11-06),
+37 files (+3,212 / −203). **Baseline: upstream v0.18.0 (released
+2026-11-06, cut from upstream/main @ `a655cee0`) plus the same day's
+stack/s3 batch on main** — ALIASEDIT with `.pgp` import and profile
+persistence (#1899/#1900), the Keyboard Shortcuts dialog, Right-Click
+Customization options, Properties palette value-discrimination fixes,
+multileader text editing (#1081), MTEXT editor hardening, and the shared
+house rules prepended to `AGENTS.md`.
+
+Five files conflicted; resolutions followed the standing rules above:
+
+- `crates/engine/src/cmd/modify2/textedit.rs` — the fork's TEXT in-place
+  editor hook (`editing_text`) stays, now guarded like upstream's
+  `editing_mtext`; upstream's pick-time locked-layer refusal, multileader
+  → MTEXT-editor routing and too-long-for-the-editor command-line
+  fallback were adopted. The auto-merge's duplicated `mtext` field was
+  removed.
+- `crates/ui-egui/src/canvas/pick.rs` — the fork's removal of the dead
+  duplicate `edit_text_at` stands; upstream's #1081 multileader case was
+  added to the live superset in `canvas.rs` instead.
+- `crates/ui-egui/src/mtext_editor.rs` — upstream's version taken
+  wholesale: editor state keyed to its target MTEXT, height-aware format
+  parsing, and an emptied or unchanged edit now saves as Enter (keeps the
+  text, no undo step), superseding the fork's clear-on-empty behaviour.
+- `crates/ui-egui/tests/it/text_double_click.rs` — both sides' new tests
+  kept (fork CJK-glyph / locked-layer / block-hint tests + upstream's
+  multileader double-click test).
+- `crates/ui-egui/src/i18n/uk.tsv` — union of both appended blocks
+  (fork OviMap / map-source strings + upstream shortcut / right-click
+  strings).
+
+Retest after the increment (this machine has no GPU adapter):
+engine full 1,687 passed / 0 failed (the parity-audit probe gate among
+them), ui-egui lib 281 / 0, ui-egui `text_double_click` integration
+13 / 0, `cargo fmt --check` clean. One integration fix was needed: the
+increment's new keys (Keyboard Shortcuts, Right-Click Customization,
+ALIASEDIT) had no `zh` entries, so `zh.tsv` gained 28 translations to
+keep the fork's full-coverage rule for the Chinese catalog. The standing
+`gpu_viewport_stencil` environment failure (no wgpu adapter) remains
+the only known non-pass, as before; it is covered by the release
+workflow's GPU runners.

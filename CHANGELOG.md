@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-11-06
+## [0.11.0] - 2026-11-07
 
 ### Changed
 
+- **Upstream baseline: `storytold/cadcraft` `main` @ `865fa9af`
+  (2026-11-06) — upstream v0.18.0 (released 2026-11-06) plus the same
+  day's stack/s3 fixes.** This fork's version line stays its own (0.11.0);
+  the baseline named here is the upstream code this release contains.
 - **Upstream sync (first)**: merged `storytold/cadcraft` upstream up to its
-  0.17.0-era `main` (918 commits since this fork's 0.6.2-era fork point) —
+  0.17.0-era `main` (918 commits since this fork's 0.6.2-era fork point),
+  then a 49-commit increment to the baseline above (ALIASEDIT, Keyboard
+  Shortcuts dialog, Right-Click Customization, multileader text editing) —
   engine submodule split with interactive prompt machines for most commands,
   DIST/AREA arc mode, PDF plot output, egui 0.37, chrono-based date/time,
   SHX font reading, XCLIP, HATCHEDIT boundary editing, AUDITCTL, web page
