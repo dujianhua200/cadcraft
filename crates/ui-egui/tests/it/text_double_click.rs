@@ -302,6 +302,8 @@ fn double_click_hints_are_translated_to_chinese() {
     );
     assert_eq!(tr("zh", "Text on a locked layer cannot be edited. Unlock the layer first."), "文字所在图层已锁定，无法编辑。请先解锁图层。");
     assert_eq!(tr("zh", "The object is outside the reference-edit working set and cannot be edited."), "该对象不在参照编辑工作集内，无法编辑。");
+}
+
 /// #1081: double-clicking a multileader's text edits it, as for TEXT and MTEXT.
 #[test]
 fn double_click_on_a_multileaders_text_starts_textedit() {

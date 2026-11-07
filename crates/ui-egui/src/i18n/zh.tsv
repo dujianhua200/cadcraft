@@ -1552,3 +1552,32 @@ menu	View	视图
 	The current file is kept as {name} until the next save.	当前文件在下次保存前保留为 {name}。
 	This format can't keep these objects yet: {objects}.	此格式尚无法保留这些对象：{objects}。
 	{count} more types	还有 {count} 种类型
+# Upstream increment 2026-11-06 (Keyboard Shortcuts / Right-Click Customization / ALIASEDIT): zh translations.
+	Keyboard Shortcuts	键盘快捷键
+	Replaces the shortcut of {commands}	替换以下命令的快捷键：{commands}
+	Needs Ctrl, Alt or a function key	需要 Ctrl、Alt 或功能键
+	Press the keys	请按键
+	Back to CADCraft's shortcut	恢复为 CADCraft 的快捷键
+	A shortcut you give wins over CADCraft's own. Changes apply at once and are kept for next time.	你设置的快捷键优先于 CADCraft 自带的。更改立即生效，并保留到下次使用。
+	Right-Click Customization...	右键自定义...
+	Right-Click Customization	右键自定义
+	Turn on time-sensitive right-click	启用按时长区分的右键单击
+	Longer click duration:	长按时长：
+	milliseconds	毫秒
+	While a command runs, a quick click is Enter and a longer click opens the shortcut menu.	命令运行期间，快速单击相当于回车，较长的单击打开快捷菜单。
+	Default Mode	默认模式
+	No objects selected and no command running:	未选择对象且无命令运行：
+	Edit Mode	编辑模式
+	Objects selected and no command running:	已选择对象且无命令运行：
+	Repeat last command	重复上一个命令
+	Shortcut Menu	快捷菜单
+	Command Mode	命令模式
+	While a command runs:	命令运行期间：
+	ENTER	回车
+	Shortcut Menu: always enabled	快捷菜单：始终启用
+	Shortcut Menu: enabled when command options are present	快捷菜单：命令有选项时启用
+	Alias files (PGP)	别名文件 (PGP)
+	Aliases are saved in your CADCraft profile and survive restarts.	别名保存在你的 CADCraft 配置文件中，重启后仍会保留。
+	Import: there is no file dialog here; run ALIASEDIT with the file's contents using its text parameter.	导入：此处没有文件对话框；请通过 ALIASEDIT 的文本参数传入文件内容来运行。
+	Import…	导入…
+	{n} more warnings; see the command line.	另有 {n} 条警告；请看命令行。
