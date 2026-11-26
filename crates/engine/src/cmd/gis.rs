@@ -64,6 +64,9 @@ pub fn specs() -> Vec<CommandSpec> {
 fn read_file(path: &str) -> Result<Vec<u8>> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // Under the automation roots the path is held to them, like every
+        // other FILES command's reads (see file_access/commands.rs).
+        crate::file_access::check_read(path).map_err(|e| bad("ovimap.import", e))?;
         std::fs::read(path).map_err(|e| bad("ovimap.import", format!("{path}: {e}")))
     }
     #[cfg(target_arch = "wasm32")]
@@ -73,6 +76,7 @@ fn read_file(path: &str) -> Result<Vec<u8>> {
 fn write_file(cmd: &str, path: &str, bytes: &[u8]) -> Result<()> {
     #[cfg(not(target_arch = "wasm32"))]
     {
+        crate::file_access::check_write(path).map_err(|e| bad(cmd, e))?;
         let tmp = format!("{path}.cadcraft-tmp");
         std::fs::write(&tmp, bytes).map_err(|e| bad(cmd, format!("{path}: {e}")))?;
         std::fs::rename(&tmp, path).map_err(|e| bad(cmd, format!("{path}: {e}")))?;

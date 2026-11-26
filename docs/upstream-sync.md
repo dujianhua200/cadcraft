@@ -235,3 +235,14 @@ io+render 1,375 / 0, doc+fonts 335 / 0, cli 27 / 0, remaining crates
 --workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. The
 standing `gpu_viewport_stencil` environment failure (no wgpu adapter) remains
 the only known non-pass, covered by the release workflow's GPU runners.
+
+CI follow-ups after the 0.11.1 release (same day): the first CI run on the
+merged main caught `ovimap.import` reading outside the automation roots —
+classified under FILES, its `read_file`/`write_file` helpers now call
+`file_access::check_read`/`check_write` like every other FILES command
+(`mcp_roots_walk` green again). `packaging-lint.yml` lost its
+`nightly-source-contract` job in this fork: those tests enforce upstream's
+nightly signing architecture (shared release.yml callers), which the fork's
+vendored unsigned release.yml deliberately is not, and the fork ships no
+nightly builds. Three shellcheck findings in `sync-upstream.yml` (SC2129,
+SC2016, SC2034) were fixed so the packaging lint's actionlint passes.

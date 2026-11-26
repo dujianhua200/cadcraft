@@ -2,6 +2,12 @@
 # packaging shell/PowerShell scripts, and the Linux desktop/AppStream/Flatpak metadata.
 name: Packaging lint
 
+# Fork note (dujianhua200/cadcraft): upstream's `nightly-source-contract` job
+# is dropped. It enforces upstream's nightly signing architecture (shared
+# release.yml callers, signer trust closure); this fork ships no nightly
+# builds and its release.yml is vendored to ship unsigned, so those contracts
+# do not apply. The lint and Windows install-policy jobs stay.
+
 on:
   push:
     branches: [main, release]
@@ -49,31 +55,3 @@ jobs:
       - name: Build and check non-executable installer fixtures
         shell: pwsh
         run: ./packaging/windows/test-install-policy.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'craft-install-policy-tests')
-
-  nightly-source-contract:
-    name: Nightly source contracts (no build or signing)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Check the nightly scripts without running them
-        run: |
-          for script in packaging/nightly-common.sh packaging/linux/nightly.sh packaging/macos/nightly.sh \
-            packaging/macos/nightly-lib.sh packaging/macos/nightly-sign.sh packaging/macos/nightly-verify.sh; do
-            bash -n "$script"
-          done
-          shellcheck --version
-          shellcheck -x -P packaging packaging/nightly-common.sh packaging/linux/nightly.sh \
-            packaging/macos/nightly.sh packaging/macos/nightly-lib.sh packaging/macos/nightly-sign.sh packaging/macos/nightly-verify.sh
-      - name: Enforce the nightly serialization and synthetic packaging contracts
-        run: python3 packaging/nightly-tests.py
-      - name: Render the Arch Nightly handoff from stub binaries
-        run: bash packaging/linux/nightly-arch-tar-test.sh
