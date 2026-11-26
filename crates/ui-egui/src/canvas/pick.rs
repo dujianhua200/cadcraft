@@ -34,7 +34,7 @@ pub(super) fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOption
 pub(super) fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let st = app.session.state().ok()?;
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
-    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    let h = cadcraft_engine::select::pick_in(&st.doc, &st.edit_space(), st.viewport_frozen(), w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
 }
 
@@ -64,6 +64,7 @@ mod hatch_pick_tests {
         let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
         let _ = app.session.zoom_extents();
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx);
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
         let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
             app.logic(&ctx);

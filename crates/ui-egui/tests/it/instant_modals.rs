@@ -26,7 +26,7 @@ fn close_prompt_is_fully_drawn_in_the_frame_of_the_menu_choice() {
     let mut app = CadApp::new(Session::default(), Services::default());
     app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.ui.start_tab = false;
-    let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(
+    let mut h = Harness::builder().with_context_setup(cadcraft_ui_egui::framework::install_headless).with_size(vec2(1280.0, 800.0)).build_ui_state(
         |ui, app: &mut CadApp| {
             app.logic(&ui.ctx().clone());
             app.ui(ui);

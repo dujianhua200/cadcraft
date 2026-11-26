@@ -43,11 +43,11 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("CENTEREXE", Kind::Real { min: 0.0, strict: false }, Def::Units(0.12, 3.5)),
     // Routines read and write these (the engine keeps them in the header, default on).
     ("CMDECHO", Kind::Choice(&[0, 1]), Def::Int(1)),
-    ("ATTDIA", Kind::Choice(&[0, 1]), Def::Int(1)),
-    // ATTREQ is not here: upstream registers it as a session setting (SETTINGS
-    // below, read via `settings.attreq`), and the merged code consumes that
-    // path. The fork's older header registration would duplicate the name and
-    // shadow the setting, so it was dropped in the 2026-11-06 sync.
+    // ATTDIA and ATTREQ are not here: upstream registers them as session settings
+    // (SETTINGS below, read via `settings.attdia` / `settings.attreq`), and the
+    // merged code consumes that path. The fork's older header registrations would
+    // duplicate the names and shadow the settings, so they were dropped (ATTREQ in
+    // the 2026-11-06 sync, ATTDIA in the 2026-11-26 sync).
     ("FILLMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("CHAMFERA", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
     ("CHAMFERB", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
@@ -68,11 +68,15 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("HPNAME", Kind::Pattern, Def::Str("ANSI31")),
     ("HPSCALE", Kind::Real { min: 0.0, strict: true }, Def::Real(1.0)),
     ("INSNAME", Kind::Name, Def::Str("")),
+    // Percent that objects on locked layers fade on screen; 0 or negative: no fade.
+    ("LAYLOCKFADECTL", Kind::Int(-90, 90), Def::Int(50)),
     ("LWDEFAULT", Kind::Choice(&LINEWEIGHTS), Def::Int(25)),
     // Negative: Through (OFFSET picks a point).
     ("OFFSETDIST", Kind::AnyReal, Def::Real(-1.0)),
     ("OFFSETERASE", Kind::Choice(&[0, 1]), Def::Int(0)),
     ("OFFSETLAYER", Kind::Choice(&[0, 1]), Def::Int(0)),
+    // The width a new polyline starts at; PLINE's Width and Halfwidth answers set it.
+    ("PLINEWID", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
     ("POLYSIDES", Kind::Int(3, 1024), Def::Int(4)),
     ("PROJMODE", Kind::Choice(&[0, 1, 2]), Def::Int(1)),
     ("REVCLOUDARCLEN", Kind::Real { min: 0.0, strict: true }, Def::Units(0.5, 15.0)),
@@ -81,6 +85,9 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("TEXTFILL", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("TRIMEXTENDMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("TRIMMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
+    ("UCSAXISANG", Kind::Choice(&[5, 10, 15, 18, 22, 30, 45, 90, 180]), Def::Int(90)),
+    // 1: the UCS icon is shown; 2: at the UCS origin when that is on screen.
+    ("UCSICON", Kind::Int(0, 3), Def::Int(3)),
     ("WIPEOUTFRAME", Kind::Choice(&[0, 1, 2]), Def::Int(1)),
     // XCLIP boundaries: 0 hidden, 1 shown and plotted, 2 shown but not plotted.
     ("XCLIPFRAME", Kind::Choice(&[0, 1, 2]), Def::Int(2)),
@@ -92,8 +99,11 @@ const LINEWEIGHTS: [i64; 24] = [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53,
 /// On/off session settings: name, read, write.
 type Toggle = (&'static str, fn(&Settings) -> bool, fn(&mut Settings, bool));
 const SETTINGS: &[Toggle] = &[
-    ("AUDITCTL", |s| s.auditctl, |s, v| s.auditctl = v),
+    // ATTDIA 1 (the default): INSERT typed or from a menu asks for attribute values in the Edit
+    // Attributes dialog; 0: at the command line. ATTREQ 0: INSERT gives every attribute its default.
+    ("ATTDIA", |s| s.attdia, |s, v| s.attdia = v),
     ("ATTREQ", |s| s.attreq, |s, v| s.attreq = v),
+    ("AUDITCTL", |s| s.auditctl, |s, v| s.auditctl = v),
     ("TRANSPARENCYDISPLAY", |s| s.transparency_display, |s, v| s.transparency_display = v),
 ];
 

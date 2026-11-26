@@ -43,15 +43,17 @@ mod curves;
 mod dim;
 mod fill;
 mod layout;
+mod proxy;
 mod text;
 mod wipeout;
 
-pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, mtext_literal};
+pub use block::{Attrib, AttribModes, AttribProps, Insert, MultilineAttrib, TagKey, mtext_literal};
 pub use common::{Common, Handle, Lineweight, RawTag, Transparency};
 pub use curves::{Arc, Circle, Ellipse, Face3d, Line, LwPolyline, Point, PolyfaceMesh, Polyline3d, RayLine, Solid};
 pub use dim::{AssocSnap, DimAssoc, DimBreak, DimKind, DimMarks, Dimension, Inspection, JoggedRadius, Leader, MLeader};
 pub use fill::{Gradient, Hatch, HatchLoop};
 pub use layout::{Image, Table, TableCell, Viewport};
+pub use proxy::{ProxyTables, proxy_entities};
 pub use text::{HAlign, MText, MTextColumnType, MTextColumns, Text, VAlign};
 pub use wipeout::Wipeout;
 
@@ -132,6 +134,11 @@ pub struct Unknown {
     /// for OLE2FRAME records whose frame groups are missing or degenerate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ole: Option<OleFrame>,
+    /// What an ACAD_PROXY_ENTITY draws: its proxy graphics as read-only entities, made when the
+    /// drawing is read (the graphics refer to table rows by their place in the file). Drawn and
+    /// measured like block contents; saving writes `tags` unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graphics: Vec<Entity>,
 }
 
 impl Unknown {
@@ -338,15 +345,23 @@ impl EntityKind {
             EntityKind::Image(i) => vec![Prim::Point(i.insert.xy())],
             EntityKind::Table(t) => vec![Prim::Point(t.insert.xy())],
             EntityKind::Tolerance(t) => vec![Prim::Point(t.insert.xy())],
-            // An OLE2FRAME draws as its frame rectangle plus both diagonals, so it is
-            // selectable and has extents; every other unmodelled type draws nothing.
+            // FORK DIVERGENCE (2026-11-26 sync): an unmodelled record draws in two
+            // unrelated ways, one from each side of the merge, and both are kept: a
+            // visible OLE2FRAME (fork) draws as its frame rectangle plus both diagonals,
+            // so it is selectable and has extents; an ACAD_PROXY_ENTITY (upstream) draws
+            // what its proxy graphics draw, so a proxy can be picked and snapped to (a
+            // filled shape's hatch is left out: its outline is drawn too, and the hatch's
+            // sides (72 for an ellipse) would offer snaps inside it). The two never
+            // coexist on one record — `ole` is set only for OLE2FRAME, `graphics` only
+            // for a proxy — so the OLE frame is tried first and every other unmodelled
+            // type draws nothing.
             EntityKind::Unknown(u) => match u.ole.as_ref().filter(|o| o.is_visible()) {
                 Some(o) => {
                     let c = o.corners();
                     let seg = |a: Vec2, b: Vec2| Prim::Seg(Segment::Line(GLine::new(a, b)));
                     vec![seg(c[0], c[1]), seg(c[1], c[2]), seg(c[2], c[3]), seg(c[3], c[0]), seg(c[0], c[2]), seg(c[1], c[3])]
                 }
-                None => Vec::new(),
+                None => u.graphics.iter().filter(|g| !matches!(g.kind, EntityKind::Hatch(_))).flat_map(|g| g.kind.prims()).collect(),
             },
         }
     }
@@ -724,7 +739,7 @@ impl EntityKind {
             EntityKind::Text(t) => vec![t.justify_point()],
             EntityKind::MText(t) => vec![t.insert.xy()],
             EntityKind::AttDef(a) => vec![a.text.justify_point()],
-            EntityKind::Insert(i) => std::iter::once(i.insert.xy()).chain(i.attribs.iter().map(|a| a.text.justify_point())).collect(),
+            EntityKind::Insert(i) => std::iter::once(i.insert.xy()).chain(i.grip_attribs().map(|(_, a)| a.text.justify_point())).collect(),
             EntityKind::Dimension(d) => vec![d.p13.xy(), d.p14.xy(), d.defpt.xy(), d.text_mid.xy()],
             EntityKind::MLine(m) => m.points(),
             EntityKind::Leader(l) => l.vertices.iter().map(|v| v.xy()).collect(),

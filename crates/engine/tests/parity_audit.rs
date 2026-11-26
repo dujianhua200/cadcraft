@@ -118,6 +118,10 @@ fn audit_dump() {
     // each verified as a command registered only after the fork point and
     // erroring for the same audited reasons (a programming surface that needs
     // its parameters / session state): `compareexport`, `imageattach`,
-    // `layout.saveas`. The FIXED_WHEN_TYPED assertions above are unchanged.
-    assert!(errs <= 76, "typed-name errors grew past the audited remainder: {errs} > 76");
+    // `layout.saveas`. +4 at the 2026-11-26 upstream sync, verified the same
+    // way (registered only after the previous sync point; each errors only
+    // with its required parameter): `blocklibimport`, `blocklibrary`,
+    // `pastetable`, `pdfimport`. The FIXED_WHEN_TYPED assertions above are
+    // unchanged.
+    assert!(errs <= 80, "typed-name errors grew past the audited remainder: {errs} > 80");
 }

@@ -122,9 +122,10 @@ fn base_typed_sets_insbase() {
 fn breakatpoint_typed_pick_then_point() {
     let mut s = Session::new();
     s.execute("line", &json!({ "points": [[0, 0], [10, 0]] })).unwrap();
-    let h = s.doc().unwrap().model.last().unwrap().handle;
     s.start("breakatpoint").unwrap();
-    s.input(Input::Pick(vec![h])).unwrap();
+    // Upstream's BREAKATPOINT (adopted at the 2026-11-26 sync) picks the object
+    // by point, as AutoCAD's does, where the fork's took a selection pick.
+    s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
     assert!(prompt_text(&s).contains("break point"), "{}", prompt_text(&s));
     s.input(Input::Point(Vec2::new(5.0, 0.0))).unwrap();
     assert!(s.running.is_none());

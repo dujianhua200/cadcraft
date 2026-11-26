@@ -283,7 +283,7 @@ fn render_tile(
                     ui.label(&t.label);
                 }
                 let shown = list.get(sel).cloned().unwrap_or_default();
-                craft_ui::ComboBox::from_id_salt(("dcl_popup", t.key.clone())).selected_text(shown).show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt(("dcl_popup", t.key.clone())).selected_text(shown).show_ui(ui, |ui| {
                     for (i, item) in list.iter().enumerate() {
                         if ui.add_enabled_ui(on, |ui| ui.selectable_label(sel == i, item)).inner.clicked() {
                             sel = i;

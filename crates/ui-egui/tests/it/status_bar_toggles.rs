@@ -14,7 +14,7 @@ fn harness() -> Harness<'static, CadApp> {
     session.open_drawing(Drawing::new_imperial(), "Status bar toggles", None);
     let mut app = CadApp::new(session, Services::default());
     app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
-    let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
+    let mut h = Harness::builder().with_context_setup(cadcraft_ui_egui::framework::install_headless).with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut CadApp| {
             app.logic(ui.ctx());
             app.ui(ui);
