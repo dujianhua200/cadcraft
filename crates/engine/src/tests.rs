@@ -1628,7 +1628,7 @@ fn a_proxy_is_drawn_but_no_selection_takes_it_in() {
     s.execute("line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
     let line = s.doc().unwrap().model.last().unwrap().handle;
     let drawn = Entity::new(Handle(0), EntityKind::Line(Line { a: Vec3::new(0.0, 5.0, 0.0), b: Vec3::new(10.0, 5.0, 0.0) }));
-    let unknown = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: vec![drawn] };
+    let unknown = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: vec![drawn], ole: None };
     let proxy = s.doc_mut().unwrap().add(&Space::Model, Common::default(), EntityKind::Unknown(unknown)).unwrap();
     let bounds = |s: &Session| entity_bounds(s.doc().unwrap(), s.doc().unwrap().entity(proxy).unwrap(), 0);
     let before = bounds(&s);

@@ -29,6 +29,7 @@ fn class_version(path: &std::path::Path) -> Option<i64> {
 #[test]
 fn saveas_down_and_back_up_keeps_the_render_settings_class_version() {
     set_io(IoHooks {
+        read_progress: None,
         read: |b, name| cadcraft_io::read(b, name).map_err(|e| e.to_string()),
         write: |d, name| cadcraft_io::write(d, name).map_err(|e| e.to_string()),
         plot: None,

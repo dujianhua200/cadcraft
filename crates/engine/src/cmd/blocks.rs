@@ -60,17 +60,13 @@ pub fn specs() -> Vec<CommandSpec> {
         attedit::dash_attedit_spec(),
         wblock::wblock_spec().interactive(|_| Ok(Box::<WblockM>::default())),
         wblock::dash_wblock_spec(),
-<<<<<<< HEAD
+        CommandSpec::new("wblockpick", "Write Block Pick", run_wblockpick)
+            .params("{mode: \"objects\"|\"base\"}")
+            .interactive(|_| Ok(Box::new(WblockPickM::default()))),
         CommandSpec::new("base", "Base", run_base)
             .menu(&["Draw", "Block", "Base"])
             .params("{at: [x,y]}")
             .interactive(|_| Ok(Box::<BaseM>::default())),
-=======
-        CommandSpec::new("wblockpick", "Write Block Pick", run_wblockpick)
-            .params("{mode: \"objects\"|\"base\"}")
-            .interactive(|_| Ok(Box::new(WblockPickM::default()))),
-        CommandSpec::new("base", "Base", run_base).menu(&["Draw", "Block", "Base"]).params("{at: [x,y]}"),
->>>>>>> upstream/main
         CommandSpec::new("blocks.dynamic", "Dynamic Block Data", run_dynamic)
             .params("{name (a block, or \"*Model_Space\" for a drawing that is a dynamic block's own)} → {parameters, actions, other} | null (not a dynamic block)")
             .enabled(has_doc)

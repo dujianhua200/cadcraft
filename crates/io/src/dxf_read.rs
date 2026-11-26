@@ -11,7 +11,7 @@ use cadcraft_doc::{
     VAlign, Viewport, VportConfig, VportTile, Wipeout,
 };
 use cadcraft_geom::{PolyVertex, Spline, Vec2, Vec3};
-use craft_dxf::{Tag, record_slices, section_slices};
+use craft_dxf::{Tag, record_slices, records, section_slices};
 
 use crate::{IoError, Result};
 
@@ -167,7 +167,7 @@ pub fn read(bytes: &[u8]) -> Result<Drawing> {
 /// [`read`], reporting the stage in `progress` (when given) and stopping early when it is
 /// cancelled. A cancelled read returns [`IoError::Cancelled`] and no drawing.
 pub fn read_with_progress(bytes: &[u8], progress: Option<&OpenProgress>) -> Result<Drawing> {
-    read_budgeted_with_progress(bytes, 4_000_000, progress)
+    read_budgeted_with_progress(bytes, 4_000_000, hatch::MAX_READ_CURVE_POINTS, progress)
 }
 
 /// A block definition read from BLOCKS: name, base point, description, entities (owner, paper
@@ -178,38 +178,31 @@ type BlockDef = (String, Vec3, String, Vec<(Option<String>, bool, Entity)>, i64)
 /// A LAYOUT object: name, tab order, block record, page setup and its limits (groups 10/11).
 type LayoutDef = (String, u32, String, PageSetup, Option<(Vec2, Vec2)>);
 
-<<<<<<< HEAD
-/// Import DXF sections while sharing one materialized-table-cell budget across blocks and entity sections.
-fn read_budgeted(bytes: &[u8], table_cells_left: usize) -> Result<Drawing> {
-    read_budgeted_with_progress(bytes, table_cells_left, None)
+/// Import DXF sections while sharing one materialized-table-cell budget and one hatch curve-point
+/// budget across blocks and entity sections.
+fn read_budgeted(bytes: &[u8], table_cells_left: usize, curve_points: usize) -> Result<Drawing> {
+    read_budgeted_with_progress(bytes, table_cells_left, curve_points, None)
 }
 
-fn read_budgeted_with_progress(bytes: &[u8], mut table_cells_left: usize, progress: Option<&OpenProgress>) -> Result<Drawing> {
+fn read_budgeted_with_progress(bytes: &[u8], mut table_cells_left: usize, curve_points: usize, progress: Option<&OpenProgress>) -> Result<Drawing> {
     if let Some(p) = progress {
         p.set_stage(OpenStage::DxfParse);
     }
-    let tags = match progress {
-        Some(p) => cadcraft_dxf::parse_with_progress(bytes, &mut |_| !p.is_cancelled()),
-        None => cadcraft_dxf::parse(bytes),
+    if progress.is_some_and(|p| p.is_cancelled()) {
+        return Err(IoError::Cancelled);
     }
-    .map_err(|e| match e {
-        cadcraft_dxf::DxfError::Cancelled { .. } => IoError::Cancelled,
-        e => IoError::Format(e.to_string()),
-    })?;
+    // FORK DIVERGENCE (2026-11-26 sync): craft-dxf has no progress-reporting parse
+    // (the fork's `parse_with_progress` lived in the deleted `crates/dxf`), so the
+    // tag stream is parsed in one call and cancellation is only honoured before
+    // and after it (and between sections below), not during it.
+    let tags = craft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
     if progress.is_some_and(|p| p.is_cancelled()) {
         return Err(IoError::Cancelled);
     }
     if let Some(p) = progress {
         p.set_stage(OpenStage::Build);
     }
-    let secs = sections(&tags);
-=======
-/// Import DXF sections while sharing one materialized-table-cell budget and one hatch curve-point
-/// budget across blocks and entity sections.
-fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize) -> Result<Drawing> {
-    let tags = craft_dxf::parse(bytes).map_err(|e| IoError::Format(e.to_string()))?;
     let secs = section_slices(&tags);
->>>>>>> upstream/main
     if secs.is_empty() {
         return Err(IoError::Format("no sections found".into()));
     }
@@ -273,22 +266,15 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize)
     let mut skipped = std::collections::BTreeMap::new();
     count_skipped(&mut skipped, "(no section)", outside_sections(&tags));
     for s in &secs {
-<<<<<<< HEAD
         if progress.is_some_and(|p| p.is_cancelled()) {
             return Err(IoError::Cancelled);
         }
-        match s.name.as_str() {
-            "HEADER" => header(&s.tags, &mut d),
-            "TABLES" => tables(&s.tags, &mut d, &mut rx),
-            "BLOCKS" => blocks.extend(read_blocks(&s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped)),
-=======
         match s.name {
             "HEADER" => header(s.tags, &mut d),
             "TABLES" => tables(s.tags, &mut d, &mut rx),
             "BLOCKS" => {
                 blocks.extend(read_blocks(s.tags, &mut d, &mut rx, &mut table_cells_left, &mut skipped, &mut seen_handles, &reserved_entity_handles))
             }
->>>>>>> upstream/main
             // A damaged file may split its entities over several ENTITIES sections (#865).
             "ENTITIES" => {
                 let mut n = 0;
@@ -355,19 +341,16 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize)
         ));
     }
     d.skipped_records = skipped;
-<<<<<<< HEAD
+    // Every record is placed now, and an object holding a reserved handle keeps it from new
+    // objects by itself. Kept, the set would be copied with every undo step of the drawing.
+    d.reserved_handles.clear();
+    remember_text_fits(&mut d);
     apply_georef(&secs, &mut d);
     fill_ole_frames(&mut d);
     ole_note(&mut d);
     if let Some(p) = progress {
         p.set_stage(OpenStage::Done);
     }
-=======
-    // Every record is placed now, and an object holding a reserved handle keeps it from new
-    // objects by itself. Kept, the set would be copied with every undo step of the drawing.
-    d.reserved_handles.clear();
-    remember_text_fits(&mut d);
->>>>>>> upstream/main
     Ok(d)
 }
 
@@ -376,11 +359,11 @@ fn read_budgeted(bytes: &[u8], mut table_cells_left: usize, curve_points: usize)
 /// XRECORD per track. The upstream reader's object table keeps dictionaries flat, so the
 /// nested dictionaries and XRECORDs are re-collected here from the OBJECTS section. A
 /// malformed entry is ignored with a read note, never a failed open.
-fn apply_georef(secs: &[cadcraft_dxf::Section], d: &mut Drawing) {
+fn apply_georef(secs: &[craft_dxf::SectionRef<'_>], d: &mut Drawing) {
     let mut xrecords: HashMap<String, Vec<Tag>> = HashMap::new();
     let mut dict_entries: HashMap<String, Vec<(String, String)>> = HashMap::new();
     for s in secs.iter().filter(|s| s.name == "OBJECTS") {
-        for (kind, tags) in records(&s.tags) {
+        for (kind, tags) in records(s.tags) {
             match kind.as_str() {
                 "DICTIONARY" => {
                     let h = tags.iter().find(|t| t.code == 5).map(|t| t.str().trim().to_ascii_uppercase()).unwrap_or_default();

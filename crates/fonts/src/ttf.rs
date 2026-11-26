@@ -951,7 +951,6 @@ fn local<R>(f: impl FnOnce(&mut Local) -> R) -> R {
     })
 }
 
-<<<<<<< HEAD
 /// Well-known font names and the installed equivalents to try when the named
 /// font is missing. A drawing that asks for SimSun (the Windows Song font) opens
 /// on macOS as Songti SC, and vice versa; without this, the style falls back to
@@ -1028,9 +1027,20 @@ fn alias_keys(k: &str) -> &'static [&'static str] {
 /// One name lookup with the resolved-name cache (found or not) applied.
 fn lookup_cached(g: &mut Db, cand: &str) -> Option<Face> {
     if let Some(r) = g.resolved.get(cand) {
-=======
+        return r.clone();
+    }
+    let r = g.lookup(cand);
+    if g.resolved.len() >= MAX_CACHED_NAMES {
+        g.resolved.clear();
+    }
+    g.resolved.insert(cand.to_string(), r.clone());
+    r
+}
+
 /// A face of an installed (or registered) font by file name or family name. Stroke-font names
-/// (".shx", empty) return `None`.
+/// (".shx", empty) return `None` — except the Chinese SHX fonts ([`CJK_SHX_STEMS`]) and,
+/// when the named font is missing, any name written in Chinese: both resolve to the unified
+/// Song face, so a Chinese drawing's text is one filled family on every machine.
 pub fn find(name: &str) -> Option<Face> {
     if let Some(r) = local(|l| l.find.get(name).cloned()) {
         return r;
@@ -1047,41 +1057,17 @@ pub fn find(name: &str) -> Option<Face> {
 }
 
 /// [`find`] through the shared table.
+///
+/// FORK DIVERGENCE (2026-11-26 sync): upstream's `find_shared` is a single
+/// exact-name lookup; the fork's resolution chain (kept from its `find`) runs
+/// here instead, inside upstream's `find`/`find_shared` split. The Chinese SHX
+/// check precedes the stroke-name rejection (a `gbcbig.shx` style is a Chinese
+/// CAD style, not a missing stroke font), the primary name is tried before its
+/// [`FONT_ALIASES`] equivalents, and a missing name written in Chinese falls
+/// back to the unified Song face. Candidates are cached one by one through
+/// [`lookup_cached`], never as one result under the primary name, so a cached
+/// miss for the primary name cannot short-circuit the alias chain.
 fn find_shared(name: &str) -> Option<Face> {
-    let k = key(name);
-    if is_stroke_name(&k) {
-        return None;
-    }
-    let mut g = lock();
-    if let Some(r) = g.resolved.get(&k) {
->>>>>>> upstream/main
-        return r.clone();
-    }
-    let r = g.lookup(cand);
-    if g.resolved.len() >= MAX_CACHED_NAMES {
-        g.resolved.clear();
-    }
-    g.resolved.insert(cand.to_string(), r.clone());
-    r
-}
-
-<<<<<<< HEAD
-/// The unified Song face: the first installed equivalent of SimSun (Songti SC
-/// on macOS, Noto Serif CJK elsewhere, SimSun itself on Windows).
-fn song_face(g: &mut Db) -> Option<Face> {
-    for cand in std::iter::once("simsun").chain(alias_keys("simsun").iter().copied()) {
-        if let Some(f) = lookup_cached(g, cand) {
-            return Some(f);
-        }
-    }
-    None
-}
-
-/// A face of an installed (or registered) font by file name or family name. Stroke-font names
-/// (".shx", empty) return `None` — except the Chinese SHX fonts ([`CJK_SHX_STEMS`]) and,
-/// when the named font is missing, any name written in Chinese: both resolve to the unified
-/// Song face, so a Chinese drawing's text is one filled family on every machine.
-pub fn find(name: &str) -> Option<Face> {
     let k = key(name);
     let mut g = lock();
     let stem = k.strip_suffix(".shx").unwrap_or(&k);
@@ -1103,6 +1089,17 @@ pub fn find(name: &str) -> Option<Face> {
     None
 }
 
+/// The unified Song face: the first installed equivalent of SimSun (Songti SC
+/// on macOS, Noto Serif CJK elsewhere, SimSun itself on Windows).
+fn song_face(g: &mut Db) -> Option<Face> {
+    for cand in std::iter::once("simsun").chain(alias_keys("simsun").iter().copied()) {
+        if let Some(f) = lookup_cached(g, cand) {
+            return Some(f);
+        }
+    }
+    None
+}
+
 /// Resolve the unified families once, synchronously: the system scan and the
 /// first face loads happen now (at app startup), not inside the first
 /// display-list build, so the first frame already shows final glyphs.
@@ -1110,7 +1107,8 @@ pub fn warm_up() {
     let _ = find("simsun");
     let _ = find("simhei");
     let _ = fallback_for('\u{6587}');
-=======
+}
+
 /// The installed font file with this stem (`DejaVuSans`, `NotoSansCJK-Regular`; case and an
 /// extension don't matter), wherever the system keeps its fonts. A font compiled in from
 /// craft-fonts is no file and gives `None`.
@@ -1119,7 +1117,6 @@ pub fn installed_font_path(stem: &str) -> Option<PathBuf> {
         Source::File(p) => Some(p.clone()),
         Source::Static(_) => None,
     }
->>>>>>> upstream/main
 }
 
 struct Prefs {

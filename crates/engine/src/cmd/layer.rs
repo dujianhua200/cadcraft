@@ -881,7 +881,7 @@ mod tests {
             common: Common { layer: "B".into(), ..Common::default() },
             kind: EntityKind::Line(Line { a: cadcraft_doc::geom::Vec3::ZERO, b: cadcraft_doc::geom::Vec3::new(1.0, 0.0, 0.0) }),
         };
-        let proxy = EntityKind::Unknown(Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: vec![line] });
+        let proxy = EntityKind::Unknown(Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: vec![line], ole: None });
         s.doc_mut().unwrap().add(&Space::Model, Common::default(), proxy).unwrap();
         s
     }

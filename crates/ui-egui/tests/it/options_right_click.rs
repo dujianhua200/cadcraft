@@ -11,7 +11,9 @@ use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
 fn app() -> CadApp {
-    CadApp::new(Session::new(), Services::default())
+    let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
+    app
 }
 
 /// One frame at `time` (seconds) with `events`; returns the painted text.

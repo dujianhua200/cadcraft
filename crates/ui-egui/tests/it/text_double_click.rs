@@ -93,37 +93,20 @@ fn double_clicked_text_takes_ime_composition_and_commit() {
     if !drawable {
         h.ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
     }
-<<<<<<< HEAD
-    // Composition is shown, not saved; the commit is inserted exactly once (#1761).
-    // Fork: the in-place editor's text field owns the IME while it is open
-    // (upstream collected the text at the command line), so the composition and
-    // the commit land in the editor, and the drawing changes only when Enter
-    // finishes the editor.
-    h.event(Event::Ime(ImeEvent::Preedit { text: "zhong".into(), active_range_chars: None }));
-    h.run_steps(1);
-=======
     // The double-clicked TEXT is edited in place (#842): composition goes into its box, not the
     // command line, and the commit is inserted exactly once (#1761).
     h.event(Event::Ime(ImeEvent::Preedit { text: "zhong".into(), active_range_chars: None }));
     h.run_steps(1);
     assert!(h.state().cmd.preedit.is_empty());
->>>>>>> upstream/main
     assert!(h.state().cmd.buffer.is_empty());
     assert_eq!(text_at(&h, 0), "HELLO", "a preedit changes nothing yet");
     h.event(Event::Ime(ImeEvent::Commit("中文".into())));
     h.run_steps(1);
-<<<<<<< HEAD
     assert_eq!(text_at(&h, 0), "HELLO", "the commit waits in the editor until it finishes");
-    h.key_press(Key::Enter);
-    h.run_steps(1);
-    let text = text_at(&h, 0);
-    assert!(text.contains("中文") && !text.contains("zhong"), "the commit is applied once, the preedit never: {text}");
-=======
     assert!(h.state().cmd.buffer.is_empty());
     h.key_press(Key::Enter);
     h.run_steps(2);
     assert_eq!(text_at(&h, 0), "中文");
->>>>>>> upstream/main
 }
 
 #[test]

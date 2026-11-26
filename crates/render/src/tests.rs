@@ -358,7 +358,6 @@ fn truetype_text_is_filled_or_outlined() {
     assert!(l.prims.len() >= 3, "O has two contours, H one");
 }
 
-<<<<<<< HEAD
 /// Far-away text (a drawing viewed whole, thousands of small glyphs) degrades to one box
 /// per glyph instead of triangulating every outline, while keeping the same footprint: the
 /// text stays visible at its place instead of vanishing or costing full detail.
@@ -378,7 +377,8 @@ fn tiny_truetype_text_degrades_to_boxes() {
     ] {
         assert!((a - b).abs() < 0.05, "the boxes keep the glyphs' footprint: full {full:?} far {far:?}");
     }
-=======
+}
+
 // Regression test for #651: filled TrueType text was triangulated at full outline detail at every
 // zoom, so a page of small text on screen produced millions of triangles and froze the canvas.
 #[test]
@@ -402,7 +402,6 @@ fn small_filled_text_on_screen_is_simplified_but_plots_keep_full_detail() {
         tiny.bounds,
         plot.bounds
     );
->>>>>>> upstream/main
 }
 
 #[test]
@@ -1110,7 +1109,6 @@ fn cancelled_build_stops_early() {
     assert!(crate::hatch::pattern_lines_until(&drawing, &h, &loops, 0.0, None, set.as_deref()).is_empty());
 }
 
-<<<<<<< HEAD
 #[test]
 fn ole_frame_renders_placeholder_rectangle() {
     use cadcraft_doc::{OleFrame, Unknown};
@@ -1128,6 +1126,7 @@ fn ole_frame_renders_placeholder_rectangle() {
                 object_type: 2,
                 preview: None,
             }),
+            graphics: Vec::new(),
         }),
     )
     .unwrap();
@@ -1139,7 +1138,12 @@ fn ole_frame_renders_placeholder_rectangle() {
     assert!(l.bounds.max.x >= 30.0 && l.bounds.max.y >= 20.0);
     // A plain unknown still draws nothing.
     let mut d2 = Drawing::new_imperial();
-    d2.add(&Space::Model, Common::default(), EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None })).unwrap();
+    d2.add(
+        &Space::Model,
+        Common::default(),
+        EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None, graphics: Vec::new() }),
+    )
+    .unwrap();
     assert!(build(&d2, &Space::Model, &Options::default()).prims.is_empty());
 }
 
@@ -1244,6 +1248,7 @@ fn ole_emf_text_follows_text_option() {
                     object_type: 2,
                     preview: None,
                 }),
+                graphics: Vec::new(),
             }),
         )
         .unwrap();
@@ -1400,7 +1405,8 @@ fn attribution_text_list_shapes_text() {
     crate::append_list(&mut base, list);
     assert!(base.prims.len() > n);
     assert!(matches!(base.prims[n].kind, Kind::Polyline | Kind::Tris), "the attribution's first primitive is vector text");
-=======
+}
+
 // ---------- locked-layer fade ----------
 
 /// A line on locked layer "Locked" (own transparency `own`) and a line on layer 0.
@@ -1498,7 +1504,6 @@ fn byblock_attribute_on_an_unlocked_layer_does_not_inherit_the_fade() {
         assert_eq!(line.transparency, 50, "the layer-0 line takes the locked reference layer's fade");
         assert!(!text.is_empty() && text.iter().all(|p| p.transparency == want), "{:?}", faded(&l));
     }
->>>>>>> upstream/main
 }
 
 /// #1434: a closed polyline with a global width narrower than a pixel loses whole sides at
@@ -1704,12 +1709,9 @@ fn raster_hatch_pattern_matches_one_by_one() {
 #[test]
 fn ole_frame_draws_its_outline() {
     let tag = |code: i32, value: &str| cadcraft_doc::RawTag { code, value: value.into() };
-<<<<<<< HEAD
-    let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
-=======
-    let frame =
-        |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, graphics: Vec::new() });
->>>>>>> upstream/main
+    let frame = |tags: Vec<cadcraft_doc::RawTag>| {
+        EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None, graphics: Vec::new() })
+    };
     let mut d = Drawing::new_imperial();
     d.add(&Space::Model, Common::default(), frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")])).unwrap();
     d.add(&Space::Model, Common::default(), frame(vec![tag(10, "1"), tag(20, "2")])).unwrap();
@@ -1758,7 +1760,7 @@ fn proxy_graphics_draw_like_block_contents() {
             EntityKind::Circle(cadcraft_doc::Circle { center: Vec3::new(15.0, 0.0, 0.0), radius: 5.0 }),
         ),
     ];
-    let proxy = EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics });
+    let proxy = EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics, ole: None });
     d.add(&Space::Model, Common { layer: "Notes".into(), ..Default::default() }, proxy).unwrap();
     let l = build(&d, &Space::Model, &Options::default());
     assert_eq!(l.prims.iter().map(|p| p.color).collect::<Vec<_>>(), [Rgb(0, 255, 0), Rgb(255, 0, 0)]);
@@ -1782,7 +1784,7 @@ fn proxy_graphics_on_a_locked_layer_fade_like_block_contents() {
             block_entity(7, Common::default(), line(0.0)),
             block_entity(7, Common { layer: "Open".into(), transparency: ByBlock, ..Default::default() }, line(2.0)),
         ];
-        let proxy = EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics });
+        let proxy = EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics, ole: None });
         d.add(&Space::Model, Common { layer: "Locked".into(), transparency: own, ..Default::default() }, proxy).unwrap();
         assert_eq!(faded(&build(&d, &Space::Model, &on_screen(with_transparency()))), vec![50.max(want), want], "{own:?}");
     }

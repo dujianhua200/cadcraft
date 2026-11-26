@@ -179,10 +179,7 @@ allocations are capped (DXF tag counts, DWG size limits, hatch segment and islan
 
 | Date | Change | Summary |
 |---|---|---|
-<<<<<<< HEAD
 | 2026-10-22 | minor | Picking measured to glyph ink (not the text frame box); TRIM/EXTEND freehand drag path (`Input::DragPath`) |
 | 2026-10-21 | minor | Text and fonts section: unified Song resolution order, OLE EMF text path, double-click in-place editing dispatch, font warm-up timing |
-=======
 | 2026-10-18 | minor | Clarify 2018 defaults, opened-drawing version selection, the DWG 2004 minimum unless explicitly overridden, and R2000 DXF structure versus output version |
->>>>>>> upstream/main
 | 2026-10-10 | major | First committed architecture doc, measured from the code (crate sizes, entity kinds, command counts) |

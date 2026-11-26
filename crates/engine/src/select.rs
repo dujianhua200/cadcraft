@@ -1190,12 +1190,9 @@ mod tests {
     #[test]
     fn clicking_an_ole_frame_edge_selects_it() {
         let tag = |code: i32, value: &str| cadcraft_doc::RawTag { code, value: value.into() };
-<<<<<<< HEAD
-        let frame = |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
-=======
-        let frame =
-            |tags: Vec<cadcraft_doc::RawTag>| EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, graphics: Vec::new() });
->>>>>>> upstream/main
+        let frame = |tags: Vec<cadcraft_doc::RawTag>| {
+            EntityKind::Unknown(cadcraft_doc::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None, graphics: Vec::new() })
+        };
         let mut d = Drawing::new_metric();
         let h = d.add(&Space::Model, Common::default(), frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")])).unwrap();
         d.add(&Space::Model, Common::default(), frame(vec![tag(10, "80"), tag(20, "80")])).unwrap();

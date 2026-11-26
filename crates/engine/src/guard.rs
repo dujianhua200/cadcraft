@@ -137,19 +137,11 @@ impl Interactive for Guarded {
             None
         })
     }
-<<<<<<< HEAD
-    fn editing_text(&self) -> Option<cadcraft_doc::Text> {
-        if self.broken.get().is_some() {
-            return None;
-        }
-        catch_unwind(AssertUnwindSafe(|| self.inner.editing_text())).unwrap_or_else(|_| {
-=======
     fn text_editor(&self) -> Option<crate::TextEditor> {
         if self.broken.get().is_some() {
             return None;
         }
         catch_unwind(AssertUnwindSafe(|| self.inner.text_editor())).unwrap_or_else(|_| {
->>>>>>> upstream/main
             self.broken.set(Some("panic in prompt"));
             None
         })

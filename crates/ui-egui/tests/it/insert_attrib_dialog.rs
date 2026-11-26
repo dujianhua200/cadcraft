@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 /// ATTDIA 1 (the default, as in AutoCAD).
 fn app() -> CadApp {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("setvar", json!({ "name": "ATTDIA", "value": 1 })).unwrap();
     let a = app.run("attdef", json!({ "tag": "A", "prompt": "Room", "default": "101", "at": [0, 2] })).unwrap();
     let b = app.run("attdef", json!({ "tag": "B", "prompt": "Floor", "default": "1", "at": [0, 4] })).unwrap();

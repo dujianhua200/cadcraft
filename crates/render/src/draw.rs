@@ -248,16 +248,18 @@ fn entity_parts(b: &mut Builder, ctx: &Ctx, e: &Entity) {
                 b.polyline(ctx, rgb, lw, l);
             }
         }
-<<<<<<< HEAD
         // An OLE2FRAME (fork behaviour, kept over upstream's frame-only branch): an EMF
         // preview draws as vector geometry in its frame; the frame border always draws,
         // the placeholder diagonals only when no preview drew (in AutoCAD the X belongs
         // to the no-preview placeholder, never across rendered content), and a centred
         // placeholder label stands in when there is no preview.
+        // FORK DIVERGENCE (2026-11-26 sync): upstream routes every Unknown with proxy
+        // graphics or an OLE frame to `draw_unknown` (graphics, else the bare frame).
+        // The fork keeps OLE frames on `draw_ole_frame` (the EMF semantics above, whose
+        // no-frame fallback is upstream's tags-derived quad) and sends only non-OLE
+        // records with proxy graphics to `draw_unknown`.
         EntityKind::Unknown(u) if u.is_ole_frame() => draw_ole_frame(b, ctx, u, rgb, lw),
-=======
-        EntityKind::Unknown(u) if !u.graphics.is_empty() || u.is_ole_frame() => draw_unknown(b, ctx, e, u, rgb, lw, own),
->>>>>>> upstream/main
+        EntityKind::Unknown(u) if !u.graphics.is_empty() => draw_unknown(b, ctx, e, u, rgb, lw, own),
         kind => {
             for prim in kind.prims() {
                 match prim {

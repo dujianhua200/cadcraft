@@ -22,6 +22,7 @@ fn purge_keeps_the_block_a_kept_dimension_names() {
         dxf_type: "ARC_DIMENSION".into(),
         tags: vec![tag(100, "AcDbEntity"), tag(8, "0"), tag(100, "AcDbDimension"), tag(2, "*D1"), tag(100, "AcDbArcDimension")],
         graphics: Vec::new(),
+        ole: None,
     };
     d.add(&Space::Model, Common::default(), EntityKind::Unknown(dim)).unwrap();
     s.execute("purge", &json!({})).unwrap();

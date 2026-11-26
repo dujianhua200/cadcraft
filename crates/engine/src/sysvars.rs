@@ -293,15 +293,12 @@ const READ_ONLY: &[&str] = &[
     "EXTMAX",
     "UNDOCTL",
     "UNDOMARKS",
-<<<<<<< HEAD
     "DATE",
-=======
     "UCSNAME",
     "UCSORG",
     "UCSXDIR",
     "UCSYDIR",
     "WORLDUCS",
->>>>>>> upstream/main
 ];
 
 pub fn is_read_only(name: &str) -> bool {

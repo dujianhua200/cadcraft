@@ -23,7 +23,6 @@ pub fn export_window_with(d: &Drawing, space: &Space, window: Option<Bounds2>, t
     export_list(&list, window)
 }
 
-<<<<<<< HEAD
 /// [`export_window_with`] with the basemap attribution line at the sheet's
 /// bottom-left corner (§9.2), when `attribution` is `Some`.
 pub fn export_window_with_attribution(d: &Drawing, space: &Space, window: Option<Bounds2>, transparency: bool, attribution: Option<&str>) -> String {
@@ -49,17 +48,9 @@ pub(crate) fn append_attribution_to_list(list: &mut cadcraft_render::DisplayList
     cadcraft_render::append_list(list, cadcraft_render::attribution::attribution_text_list(text, at, height, &opts));
 }
 
-/// ` opacity="…"` for a transparent primitive (none for an opaque one or a wipeout's mask).
-fn opacity(p: &cadcraft_render::DPrim) -> String {
-    if p.kind == Kind::Mask || p.transparency == 0 {
-        return String::new();
-    }
-    format!(r#" opacity="{:.2}""#, f64::from(p.alpha()) / 255.0)
-=======
 /// Opacity for a transparent primitive (none for an opaque one or a wipeout's mask).
 fn opacity(p: &cadcraft_render::DPrim) -> Option<String> {
     (p.kind != Kind::Mask && p.transparency != 0).then(|| format!("{:.2}", f64::from(p.alpha()) / 255.0))
->>>>>>> upstream/main
 }
 
 /// Write a display list (as [`export_window`] does for a space's own).

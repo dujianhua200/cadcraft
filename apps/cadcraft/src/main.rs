@@ -29,9 +29,6 @@ mod launch_profile;
 mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
-<<<<<<< HEAD
-mod open_file;
-=======
 mod nightly_session;
 mod portable;
 mod process_identity;
@@ -39,7 +36,6 @@ mod profile_root;
 #[cfg(target_os = "macos")]
 mod sheet;
 mod single_instance;
->>>>>>> upstream/main
 mod spacemouse;
 mod system_animations;
 mod workspace;
@@ -62,9 +58,6 @@ struct App {
     single_instance: Option<single_instance::Server>,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
-    /// The desktop open-file source (Finder double-click, "Open With", Dock drop on macOS);
-    /// kept alive until the event loop returns, so its handler stays registered.
-    desktop_files: open_file::DesktopFiles,
     /// `CADCRAFT_NO_NATIVE_MENU`: the menus stay inside the window.
     #[cfg(target_os = "macos")]
     menus_in_window: bool,
@@ -107,10 +100,6 @@ fn follow_desktop(raw: &mut egui::RawInput, desktop: Option<egui::Theme>) {
 impl eframe::App for App {
     /// eframe logic callback: syncs the OS animation setting and runs `CadApp::logic`; when the pass index is 0 (the first pass or a hidden tick) it also installs/polls the macOS native menu, polls the spacemouse and persists the workspace; a quit request closes the viewport.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // A desktop handoff (Finder double-click, "Open With", Dock drop on macOS) opens
-        // through the same `open_path` File ▸ Open uses; a desktop quit request closes.
-        let desktop = self.desktop_files.drain();
-        apply_desktop_events(&mut self.cad, desktop);
         self.cad.system_animations = self.system_animations.current();
         // Files another launch handed over open as tabs here, and the window comes forward.
         if let Some(server) = &self.single_instance {
@@ -371,78 +360,6 @@ fn version_string() -> String {
     format!("cadcraft {}", cadcraft_engine::build_version())
 }
 
-<<<<<<< HEAD
-/// A desktop handoff from [`open_file::DesktopFiles::drain`]: open each file through the
-/// same `open_path` File ▸ Open uses, and quit on a desktop quit request (Cmd+Q, Dock ▸ Quit).
-fn apply_desktop_events(cad: &mut CadApp, events: Vec<open_file::DesktopEvent>) {
-    for event in events {
-        match event {
-            open_file::DesktopEvent::Open(path) => cad.open_path(&path),
-            open_file::DesktopEvent::Quit => cad.quit_requested = true,
-        }
-    }
-}
-
-/// The control port from `--control <port>` or `CADCRAFT_CONTROL_PORT` (`source`); a value that is
-/// not a port is logged and ignored instead of silently starting no control channel.
-// Fork note: upstream replaced this hand-rolled parser with `launch_args`
-// (clap; a bad flag is a usage error, exit 2). The parser and its unit tests
-// are kept for reference under `cfg(test)` only — `main` does not call them.
-#[cfg(test)]
-fn control_port_from(source: &str, value: Option<String>) -> Option<u16> {
-    let value = value?;
-    let port = value.trim().parse().ok();
-    if port.is_none() {
-        log::warn!("{source}: {value:?} is not a port number; the control channel is off");
-    }
-    port
-}
-
-/// `--control` followed by `value`: a bare `--control` (last argument) keeps the port already
-/// read from `CADCRAFT_CONTROL_PORT` (`current`) instead of turning the control channel off.
-#[cfg(test)]
-fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
-    if value.is_some() {
-        return control_port_from("--control", value);
-    }
-    match current {
-        Some(port) => log::warn!("--control: no port given; using CADCRAFT_CONTROL_PORT ({port})"),
-        None => log::warn!("--control: no port given; the control channel is off"),
-    }
-    current
-}
-
-/// The command-line arguments `main` acts on: `--control <port>`, `--sample`, files to
-/// open, and `--version` / `-V` (which prints and exits before any log file is opened).
-#[cfg(test)]
-struct StartupArgs {
-    control_port: Option<u16>,
-    files: Vec<String>,
-    sample: bool,
-    version: bool,
-}
-
-/// Split `args` (already without the program name) into [`StartupArgs`]; `env_port` is the
-/// port from `CADCRAFT_CONTROL_PORT`, which a bare `--control` keeps. Anything that is not
-/// a recognised flag is a file to open, so `cadcraft drawing.dwg` and `cadcraft --bogus`
-/// both reach `open_path` (the latter fails there, like a bad File ▸ Open).
-#[cfg(test)]
-fn parse_startup_args(mut args: impl Iterator<Item = String>, env_port: Option<u16>) -> StartupArgs {
-    let mut control_port = env_port;
-    let mut files = Vec::new();
-    let mut sample = false;
-    let mut version = false;
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--control" => control_port = control_flag(control_port, args.next()),
-            "--sample" => sample = true,
-            "--version" | "-V" => version = true,
-            _ => files.push(a),
-        }
-    }
-    StartupArgs { control_port, files, sample, version }
-}
-=======
 /// The Nightly identity line every nightly script checks: `<App> <version> (nightly-v1)`, with the
 /// prepared nightly version embedded at build time. The app name never gains a "Nightly".
 fn nightly_version_line() -> String {
@@ -537,7 +454,65 @@ fn prepare_launch() -> Option<Vec<std::ffi::OsString>> {
     Some(early.args)
 }
 
->>>>>>> upstream/main
+/// The control port from `--control <port>` or `CADCRAFT_CONTROL_PORT` (`source`); a value that is
+/// not a port is logged and ignored instead of silently starting no control channel.
+// Fork note: upstream replaced this hand-rolled parser with `launch_args`
+// (clap; a bad flag is a usage error, exit 2). The parser and its unit tests
+// are kept for reference under `cfg(test)` only — `main` does not call them.
+#[cfg(test)]
+fn control_port_from(source: &str, value: Option<String>) -> Option<u16> {
+    let value = value?;
+    let port = value.trim().parse().ok();
+    if port.is_none() {
+        log::warn!("{source}: {value:?} is not a port number; the control channel is off");
+    }
+    port
+}
+
+/// `--control` followed by `value`: a bare `--control` (last argument) keeps the port already
+/// read from `CADCRAFT_CONTROL_PORT` (`current`) instead of turning the control channel off.
+#[cfg(test)]
+fn control_flag(current: Option<u16>, value: Option<String>) -> Option<u16> {
+    if value.is_some() {
+        return control_port_from("--control", value);
+    }
+    match current {
+        Some(port) => log::warn!("--control: no port given; using CADCRAFT_CONTROL_PORT ({port})"),
+        None => log::warn!("--control: no port given; the control channel is off"),
+    }
+    current
+}
+
+/// The command-line arguments `main` acts on: `--control <port>`, `--sample`, files to
+/// open, and `--version` / `-V` (which prints and exits before any log file is opened).
+#[cfg(test)]
+struct StartupArgs {
+    control_port: Option<u16>,
+    files: Vec<String>,
+    sample: bool,
+    version: bool,
+}
+
+/// Split `args` (already without the program name) into [`StartupArgs`]; `env_port` is the
+/// port from `CADCRAFT_CONTROL_PORT`, which a bare `--control` keeps. Anything that is not
+/// a recognised flag is a file to open, so `cadcraft drawing.dwg` and `cadcraft --bogus`
+/// both reach `open_path` (the latter fails there, like a bad File ▸ Open).
+#[cfg(test)]
+fn parse_startup_args(mut args: impl Iterator<Item = String>, env_port: Option<u16>) -> StartupArgs {
+    let mut control_port = env_port;
+    let mut files = Vec::new();
+    let mut sample = false;
+    let mut version = false;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--control" => control_port = control_flag(control_port, args.next()),
+            "--sample" => sample = true,
+            "--version" | "-V" => version = true,
+            _ => files.push(a),
+        }
+    }
+    StartupArgs { control_port, files, sample, version }
+}
 /// Parse CLI options (`--control`, `--sample`, files, `--version`), install logging and I/O hooks, build the services and app, and run eframe.
 fn main() -> eframe::Result {
     // A copy of this program started to read or write a DWG file does only that. It is started
@@ -549,26 +524,12 @@ fn main() -> eframe::Result {
     cadcraft_io::dwg_worker::use_own_worker();
     // First, so every start-up record is captured; see `logging`.
     let logger = logging::install();
-<<<<<<< HEAD
     // FORK (dujianhua200/cadcraft): upstream's self-update helper is disabled. It
     // downloads releases from storytold/cadcraft and would replace this fork build
     // (and all fork features) with an upstream one. This fork updates through its
     // own GitHub Releases instead; see docs/upstream-sync.md. The upstream call was:
-    // `craft_update::self_update::finish(&cadcraft_ui_egui::UPDATE_APP, …)`.
-=======
-    // The update helper relaunches this binary after a self-update; it runs and exits here. A
-    // nightly build is updated by the Launcher only, so it never finishes a stable helper.
-    #[cfg(not(target_arch = "wasm32"))]
-    if !is_nightly()
-        && let Some(done) = craft_update::self_update::finish(&cadcraft_ui_egui::UPDATE_APP, &arguments)
-    {
-        if let Err(e) = done {
-            eprintln!("CADCraft update helper failed: {e}");
-            std::process::exit(1);
-        }
-        return Ok(());
-    }
->>>>>>> upstream/main
+    // `craft_update::self_update::finish(&cadcraft_ui_egui::UPDATE_APP, &arguments)`
+    // (upstream also gates it on `!is_nightly()`; the whole call stays out here).
     // `--help` and `--version` print to standard output and exit 0. A usage error (an unknown or
     // repeated flag, a missing or bad value, a bad CADCRAFT_CONTROL_PORT) names the argument on
     // standard error and exits 2 before the window opens.
@@ -684,18 +645,8 @@ fn main() -> eframe::Result {
             b.with_x11();
         }));
     }
-<<<<<<< HEAD
-    // The desktop open-file handler (Finder double-click, "Open With", Dock drop on macOS):
-    // installed before the event loop starts, so its will-finish-launching registration
-    // survives AppKit's own handler installation; the guard lives in the app below.
-    let desktop_files = open_file::DesktopFiles::install();
-    // macOS: Quit CADCraft (Cmd+Q), the Dock's Quit and logout end the app through AppKit's
-    // terminate, which would skip the unsaved-changes prompt (#2157). winit turns each into a
-    // close request for the window instead, so it asks first, as the close button does.
-=======
     // Registered before the event loop starts, so it catches the Finder event that launched us as
     // well as later ones. Lives until the event loop returns; the app creator only borrows it.
->>>>>>> upstream/main
     #[cfg(target_os = "macos")]
     let apple_events = apple_events::AppleEvents::install();
     #[cfg(target_os = "macos")]
@@ -706,15 +657,7 @@ fn main() -> eframe::Result {
         os_window::name_for(os_window::identity()),
         options,
         Box::new(move |cc| {
-<<<<<<< HEAD
-            // A desktop handoff wakes a frame, so the open is not stuck behind an idle UI.
-            {
-                let ctx = cc.egui_ctx.clone();
-                desktop_files.set_wake(move || ctx.request_repaint());
-            }
-=======
             cadcraft_ui_egui::framework::install(&cc.egui_ctx, forced_x11, frame.clone())?;
->>>>>>> upstream/main
             let mut app = CadApp::new(Session::empty(), services());
             // The exit hook runs in `on_exit`: macOS ends the process inside AppKit's terminate after
             // it, so nothing after `run_native` can be relied on there.
@@ -822,11 +765,7 @@ fn main() -> eframe::Result {
                 spacemouse: spacemouse::SpaceMouse::start(cc.egui_ctx.clone()),
                 workspace,
                 workspace_error,
-<<<<<<< HEAD
-                desktop_files,
-=======
                 single_instance: instance,
->>>>>>> upstream/main
                 #[cfg(target_os = "macos")]
                 native_menu: None,
                 #[cfg(target_os = "macos")]
@@ -846,13 +785,8 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::{
-<<<<<<< HEAD
-        CadApp, Services, Session, apply_desktop_events, filters_for_save, follow_desktop, install_io, open_file::DesktopEvent, parse_startup_args,
-        saved_window, window_options,
-=======
-        STENCIL_BITS, filters_for_save, follow_desktop, nightly_version_line, saved_window, stencil_bits, version_string, window_options,
-        without_tiny_window,
->>>>>>> upstream/main
+        STENCIL_BITS, filters_for_save, follow_desktop, nightly_version_line, parse_startup_args, saved_window, stencil_bits, version_string,
+        window_options, without_tiny_window,
     };
 
     #[test]
@@ -984,38 +918,6 @@ mod tests {
         // An unrecognised flag is a file to open, not an error.
         let args = parse_startup_args(["--bogus"].into_iter().map(String::from), None);
         assert_eq!(args.files, ["--bogus"]);
-    }
-
-    #[test]
-    fn desktop_quit_event_requests_quit() {
-        let mut app = CadApp::new(Session::new(), Services::default());
-        apply_desktop_events(&mut app, vec![DesktopEvent::Quit]);
-        assert!(app.quit_requested);
-    }
-
-    /// A desktop Open event reaches the same `open_path` File ▸ Open uses: the drawing
-    /// arrives in the session once its background read finishes.
-    #[test]
-    fn desktop_open_event_opens_a_drawing() {
-        // The reader hooks are installed by `main`; without them the open fails.
-        install_io();
-        let dir = std::env::temp_dir().join(format!("cadcraft-desktop-open-{}", std::process::id()));
-        assert!(std::fs::create_dir_all(&dir).is_ok());
-        let path = dir.join("empty.dxf");
-        let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nENDSEC\n0\nSECTION\n2\nBLOCKS\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n";
-        assert!(std::fs::write(&path, dxf).is_ok());
-        let mut app = CadApp::new(Session::empty(), Services::default());
-        let before = app.session.docs.len();
-        apply_desktop_events(&mut app, vec![DesktopEvent::Open(path.clone())]);
-        let start = std::time::Instant::now();
-        while app.session.docs.len() == before && start.elapsed() < std::time::Duration::from_secs(10) {
-            app.finish_opening();
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        app.finish_opening();
-        assert_eq!(app.session.docs.len(), before + 1);
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(&dir);
     }
 }
 

@@ -106,15 +106,14 @@ impl GetRequest {
                 Ok(Value::Nil)
             }
             Input::Keyword(k) => Ok(Value::str(&k)),
-<<<<<<< HEAD
-            Input::Point(p) | Input::PointShift(p) => self.point(s, [p.x, p.y, 0.0]),
-=======
             // Points come back in the current UCS, on its XY plane.
-            Input::Point(p) => {
+            // FORK DIVERGENCE (2026-11-26 sync): fork's `PointShift` (shift-pick, TRIM/
+            // EXTEND) answers a getxxx prompt as an ordinary point; it gets upstream's
+            // UCS conversion too.
+            Input::Point(p) | Input::PointShift(p) => {
                 let u = s.ucs_point(p);
                 self.point(s, [u.x, u.y, 0.0])
             }
->>>>>>> upstream/main
             // A deferred tangent/perpendicular snap is the point it was picked at here.
             Input::Deferred(d) => {
                 let u = s.ucs_point(d.at);
@@ -405,7 +404,11 @@ pub(crate) fn pick_result(s: &Session, p: [f64; 3]) -> Value {
     let ap = s.settings.pickbox.max(1.0) * s.pixel_size();
     let Ok(space) = s.state().map(|st| st.edit_space()) else { return Value::Nil };
     let Ok(d) = s.doc() else { return Value::Nil };
-    match crate::select::pick(d, &space, Vec2::new(p[0], p[1]), ap) {
+    // FORK DIVERGENCE (2026-11-26 sync): ported to upstream's UCS/viewport picking
+    // (as in `point`'s EntSel arm above): `p` is a routine's UCS point, objects are
+    // picked at the world point, and viewport-frozen layers don't pick. The result
+    // still carries the UCS point `p`, as `entsel` returns it.
+    match crate::select::pick_in(d, &space, s.viewport_frozen(), s.input_ucs().to_wcs(Vec2::new(p[0], p[1])), ap) {
         Some(h) => Value::list(vec![Value::Ename(h), Value::point(&p)]),
         None => Value::Nil,
     }

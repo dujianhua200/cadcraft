@@ -11,6 +11,7 @@ use serde_json::json;
 fn setup_io() {
     // Writes a minimal JSON blob so tests can read back entity counts, line endpoints and INSBASE.
     set_io(IoHooks {
+        read_progress: None,
         read: |_, _| Ok(Drawing::new_imperial()),
         write: |d, _| {
             let model_n = d.model.len();

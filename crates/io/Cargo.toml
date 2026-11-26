@@ -14,6 +14,9 @@ cadcraft-color = { workspace = true }
 cadcraft-doc = { workspace = true }
 craft-dxf = { workspace = true }
 craft-dwg = { workspace = true }
+# Fork: OLE preview classification/extraction (ole_preview_kind/ole_emf_bytes) lives in the
+# fork's cadcraft-dwg; upstream's bridge moved to craft-dwg without those helpers.
+cadcraft-dwg = { workspace = true }
 craft-svg = { workspace = true }
 craft-image-codecs = { workspace = true }
 cadcraft-render = { workspace = true }

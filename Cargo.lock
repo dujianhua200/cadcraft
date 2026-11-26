@@ -728,11 +728,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cadcraft"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -766,11 +762,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-cli"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-engine",
  "cadcraft-fonts",
@@ -787,22 +779,14 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-color"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cadcraft-constraints"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-doc",
  "cadcraft-geom",
@@ -812,11 +796,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-doc"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-color",
  "cadcraft-geom",
@@ -827,7 +807,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "cadcraft-dwg"
 version = "0.11.0"
 dependencies = [
@@ -836,21 +815,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "cadcraft-dxf"
-version = "0.11.0"
-dependencies = [
- "encoding_rs",
- "log",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "cadcraft-engine"
 version = "0.11.0"
-=======
-name = "cadcraft-engine"
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-color",
  "cadcraft-constraints",
@@ -861,12 +827,9 @@ dependencies = [
  "cadcraft-render",
  "craft-csv",
  "craft-docpath",
-<<<<<<< HEAD
- "encoding_rs",
-=======
  "craft-dxf",
  "craft-mime",
->>>>>>> upstream/main
+ "encoding_rs",
  "libc",
  "log",
  "rstar",
@@ -878,11 +841,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-fonts"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-doc",
  "cadcraft-geom",
@@ -898,26 +857,19 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-geom"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "cadcraft-io"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "acadrust",
  "cadcraft-color",
  "cadcraft-doc",
+ "cadcraft-dwg",
  "cadcraft-fonts",
  "cadcraft-geom",
  "cadcraft-render",
@@ -939,11 +891,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-mcp"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-engine",
  "cadcraft-io",
@@ -960,22 +908,15 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-render"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
  "cadcraft-dwg",
  "cadcraft-fonts",
  "cadcraft-geom",
-<<<<<<< HEAD
- "image",
-=======
  "craft-image-codecs",
->>>>>>> upstream/main
+ "image",
  "lyon_tessellation",
  "rayon",
  "serde_json",
@@ -984,11 +925,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-ui-egui"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
@@ -1021,11 +958,7 @@ dependencies = [
 
 [[package]]
 name = "cadcraft-web"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "cadcraft-engine",
  "cadcraft-fonts",
@@ -7094,9 +7027,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+checksum = "7265c9301c16a8711c992c2d8da90ee77ef54b1ed51482d6dfeb00dc756b1297"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -7767,11 +7700,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 dependencies = [
  "chrono",
  "serde_json",

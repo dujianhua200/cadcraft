@@ -99,7 +99,6 @@ fn fence_work(s: &Session, pts: &[Vec2]) -> Result<(Vec<(Handle, Vec<Vec2>)>, f6
     Ok((work, tol))
 }
 
-<<<<<<< HEAD
 impl Session {
     /// TRIM or EXTEND is waiting for objects to trim/extend, or for fence points: the UI
     /// collects primary drags as [`Input::DragPath`] (a freehand trim path) instead of
@@ -117,12 +116,10 @@ impl Session {
             })
     }
 }
-=======
 /// How far along a segment from its end a crossing window's pick is kept: past the 5e-7 within
 /// which a pick is on a polyline's own cut at that vertex. A cut this near the end is taken as at
 /// the end, the pick landing just past it.
 const OFF_VERTEX: f64 = 1e-6;
->>>>>>> upstream/main
 
 /// Trim (or extend) every object a crossing window from `a` to `b` touches, picked at its point
 /// in the window nearest the first corner `a`.
@@ -456,7 +453,9 @@ impl TrimM {
         let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
         let space = s.space();
         let Some(h) = s.pick_object(&space, p, ap)? else {
-            self.stage = Stage::Crossing(Some(p));
+            // A pick in empty space starts a two-point fence in Quick mode (as in
+            // AutoCAD, #1594) and a crossing window in Standard mode.
+            self.stage = if quick { Stage::QuickFence(p) } else { Stage::Crossing(Some(p)) };
             return Ok(Step::Continue);
         };
         let r = self.step(s, |m, s| apply(s, h, p, extending, m.edges(quick, implied), quick).map(|_| ()));
@@ -694,7 +693,6 @@ impl Interactive for TrimM {
                 Ok(Step::Continue)
             }
             Stage::Pick => match i {
-<<<<<<< HEAD
                 Input::Point(p) => self.pick_at(s, p, extending, quick, implied),
                 // Shift held: the opposite operation for this one pick (TRIM extends,
                 // EXTEND trims), as the prompt advertises.
@@ -707,20 +705,6 @@ impl Interactive for TrimM {
                         if let Err(e) = r {
                             s.echo(e.to_string());
                         }
-=======
-                Input::Point(p) => {
-                    let ap = s.pixel_size() * s.settings.pickbox.max(1.0) * 1.5;
-                    let space = s.space();
-                    let Some(h) = s.pick_object(&space, p, ap)? else {
-                        // A pick in empty space starts a two-point fence in Quick mode (as in
-                        // AutoCAD, #1594) and a crossing window in Standard mode.
-                        self.stage = if quick { Stage::QuickFence(p) } else { Stage::Crossing(Some(p)) };
-                        return Ok(Step::Continue);
-                    };
-                    let r = self.step(s, |m, s| apply(s, h, p, extending, m.edges(quick, implied), quick).map(|_| ()));
-                    if let Err(e) = r {
-                        s.echo(e.to_string());
->>>>>>> upstream/main
                     }
                     Ok(Step::Continue)
                 }

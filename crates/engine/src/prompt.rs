@@ -374,18 +374,10 @@ pub trait Interactive: Send {
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         None
     }
-<<<<<<< HEAD
-    /// The single-line text being edited (TEXTEDIT on a TEXT): the UI places its in-place
-    /// editor on it, exactly as for [`Interactive::editing_mtext`], so a double-click on a
-    /// TEXT never drops to the command-line prompt.
-    fn editing_text(&self) -> Option<cadcraft_doc::Text> {
-        None
-=======
     /// The text the in-place editor edits: where, how, its current contents and what kind of
     /// object holds it. By default the new multiline text of [`Interactive::editing_mtext`].
     fn text_editor(&self) -> Option<TextEditor> {
         self.editing_mtext().map(|mtext| TextEditor { mtext, kind: EditorKind::NewMText, key: String::new(), extents: None })
->>>>>>> upstream/main
     }
     /// What the drawing area shows in place of the drawing while the command runs (DVIEW draws
     /// only its preview set); `None` shows the drawing.

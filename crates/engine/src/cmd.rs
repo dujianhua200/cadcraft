@@ -48,12 +48,8 @@ mod qselect;
 mod selecttools;
 mod settings;
 mod spline_opts;
-<<<<<<< HEAD
-mod table;
-mod tilemap;
-=======
 pub mod table;
->>>>>>> upstream/main
+mod tilemap;
 mod tolerance;
 mod trimextend;
 pub use trimextend::PREVIEW_MAX_PICKS as TRIM_PREVIEW_MAX_PICKS;

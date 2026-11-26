@@ -1103,7 +1103,7 @@ mod tests {
             other => panic!("{other:?}"),
         }
         // Picked and snapped by the ellipse only, not the hatch's sides.
-        let u = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: es };
+        let u = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: es, ole: None };
         let prims = EntityKind::Unknown(u).prims();
         assert!(matches!(prims.as_slice(), [crate::entity::Prim::Ellipse(_)]), "{prims:?}");
         // A tiny scale under a far translation keeps the circle: radius 1e8 at scale 1e-8 is 1.
@@ -1236,6 +1236,7 @@ mod tests {
             dxf_type: "ACAD_PROXY_ENTITY".into(),
             tags: vec![tag(90, "498"), tag(92, "5"), tag(310, "0102"), tag(310, "030405FF"), tag(93, "0")],
             graphics: Vec::new(),
+            ole: None,
         };
         assert_eq!(u.proxy_graphics_bytes(), [1, 2, 3, 4, 5]);
         let other = Unknown { dxf_type: "ACAD_PROXY_OBJECT".into(), ..u.clone() };
@@ -1288,6 +1289,7 @@ mod tests {
                 tag(40, "0.785398"),
             ],
             graphics: Vec::new(),
+            ole: None,
         };
         assert_eq!(u.proxy_graphics_bytes(), g);
         let es = proxy_entities(&u.proxy_graphics_bytes(), &tables(), Handle(1));
@@ -1315,6 +1317,7 @@ mod tests {
             dxf_type: "ACAD_PROXY_ENTITY".into(),
             tags: vec![tag(100, "AcDbProxyEntity"), tag(92, &g.len().to_string()), tag(310, &hex), tag(310, "GG")],
             graphics: proxy_entities(&g, &tables, Handle(1)),
+            ole: None,
         };
         assert_eq!(u.graphics[0].common.layer, "B");
         let written: Vec<String> = ["0", "B", "C"].map(String::from).to_vec();
@@ -1344,7 +1347,7 @@ mod tests {
                 chunks.push(chunk(2, &circle));
             }
             let g = graphics(&chunks);
-            let u = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: proxy_entities(&g, &tables, Handle(1)) };
+            let u = Unknown { dxf_type: "ACAD_PROXY_ENTITY".into(), tags: Vec::new(), graphics: proxy_entities(&g, &tables, Handle(1)), ole: None };
             let mut learned: Vec<(u32, Option<String>)> = u.layers_by_index(&g, indices).into_iter().collect();
             learned.sort();
             learned
@@ -1366,6 +1369,7 @@ mod tests {
             dxf_type: "ACAD_PROXY_ENTITY".into(),
             tags: vec![tag(100, "AcDbProxyEntity"), tag(92, &g.len().to_string()), tag(310, &hex)],
             graphics: proxy_entities(&g, &tables, Handle(1)),
+            ole: None,
         };
         assert_eq!(u.graphics.iter().map(|e| e.common.layer.as_str()).collect::<Vec<_>>(), ["0", "A"]);
         assert!(!u.layers_by_index(&g, &[4, 1, 4]).contains_key(&4), "index 4 isn't named");

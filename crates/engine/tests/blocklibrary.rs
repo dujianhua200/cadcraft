@@ -266,7 +266,7 @@ fn a_cancelled_insert_keeps_the_definition_from_a_file(s: &mut Session, file: &s
 /// One test: the file hooks and the settings folder are global to the process.
 #[test]
 fn libraries_list_import_and_are_kept() {
-    set_io(IoHooks { read, write: |_, _| Err("no writer in this test".into()), plot: None });
+    set_io(IoHooks { read_progress: None, read, write: |_, _| Err("no writer in this test".into()), plot: None });
     // No settings folder: the list lives in memory, and the real one is never written.
     cadcraft_engine::settings_dir::set(None);
     let dir = folder();

@@ -370,7 +370,9 @@ fn default_language_is_chinese_and_auto_follows_a_chinese_system() {
         assert_eq!(Preference::Auto.resolve(&[tag.into()]), "zh", "{tag}");
     }
     assert_eq!(Preference::Auto.resolve(&["en-US".into()]), "en");
-    assert_eq!(Preference::Auto.resolve(&["pl-PL".into(), "zh-CN".into()]), "zh");
+    // An unsupported system language is skipped (Polish was one when this was
+    // written; upstream has since added it, so Dutch stands in).
+    assert_eq!(Preference::Auto.resolve(&["nl-NL".into(), "zh-CN".into()]), "zh");
     // The Chinese catalog covers the whole English key set: every key any catalog has.
     let mut english = BTreeSet::new();
     for language in &LANGUAGES {

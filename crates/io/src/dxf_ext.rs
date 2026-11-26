@@ -35,7 +35,6 @@ pub(crate) const PLOT_STYLE_NAMES_KEY: &str = "ACAD_PLOTSTYLENAME";
 pub(crate) const HANDSEED_KEY: &str = "CADCRAFT_HANDSEED";
 /// Named-object-dictionary key of the XRECORD holding the current multileader style.
 pub(crate) const MLEADER_STYLE_KEY: &str = "CADCRAFT_MLEADERSTYLE";
-<<<<<<< HEAD
 /// Named-object-dictionary key of the OviMap link's dictionary (`docs/ovimap-link.md`
 /// §4.3): it holds the `GEOREF` XRECORD and the `VERTICES_*` XRECORDs.
 pub(crate) const OVIMAP_GEOREF_KEY: &str = "OVIMAP_GEOREF";
@@ -43,7 +42,6 @@ pub(crate) const OVIMAP_GEOREF_KEY: &str = "OVIMAP_GEOREF";
 pub(crate) const OVIMAP_GEOREF_ENTRY: &str = "GEOREF";
 /// Dictionary-entry prefix of a track's vertex-id XRECORD (`VERTICES_<lineGroupId>`).
 pub(crate) const OVIMAP_VERTICES_PREFIX: &str = "VERTICES_";
-=======
 /// Named-object-dictionary key of the XRECORD holding model space's current UCS name ($UCSNAME,
 /// which the DWG bridge drops).
 pub(crate) const UCS_NAME_KEY: &str = "CADCRAFT_UCSNAME";
@@ -80,7 +78,6 @@ pub(crate) fn named_ucs<'a>(
 pub(crate) fn usable_axes(x: cadcraft_geom::Vec3, y: cadcraft_geom::Vec3) -> bool {
     x.is_finite() && y.is_finite() && x.len() > 1e-12 && y.len() > 1e-12 && x.cross(y).len() > 1e-9 * x.len() * y.len()
 }
->>>>>>> upstream/main
 /// Most plot style tables and plot style names read from a file.
 pub(crate) const MAX_PLOT_STYLE_TABLES: usize = 1000;
 pub(crate) const MAX_PLOT_STYLE_NAMES: usize = 100_000;
@@ -991,8 +988,8 @@ pub(crate) fn parse_vertices_tags(tags: &[Tag]) -> Option<Vec<String>> {
 
 /// A `Tag` value for a raw group value: reals parse as reals (so the writer emits the
 /// same digits), everything else stays text.
-fn tag_value(code: i32, value: &str) -> cadcraft_dxf::Value {
-    use cadcraft_dxf::{Kind, Value, kind_of};
+fn tag_value(code: i32, value: &str) -> craft_dxf::Value {
+    use craft_dxf::{Kind, Value, kind_of};
     match kind_of(code) {
         Kind::Real => value.trim().parse::<f64>().ok().filter(|x| x.is_finite()).map(Value::Real).unwrap_or_else(|| Value::Str(value.to_string())),
         Kind::Int16 | Kind::Int32 | Kind::Int64 => value.trim().parse::<i64>().ok().map(Value::Int).unwrap_or_else(|| Value::Str(value.to_string())),

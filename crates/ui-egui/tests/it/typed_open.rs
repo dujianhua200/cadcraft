@@ -17,6 +17,7 @@ use temp_dir::TempDir;
 /// is installed first, opening works the same).
 fn install_reader() {
     cadcraft_engine::cmd::file::set_io(cadcraft_engine::cmd::file::IoHooks {
+        read_progress: None,
         read: |_, _| Ok(cadcraft_engine::doc::Drawing::new_metric()),
         write: |_, _| Ok(b"0\nSECTION\n0\nENDSEC\n0\nEOF\n".to_vec()),
         plot: None,

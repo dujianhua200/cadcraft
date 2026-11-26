@@ -145,3 +145,93 @@ keep the fork's full-coverage rule for the Chinese catalog. The standing
 `gpu_viewport_stencil` environment failure (no wgpu adapter) remains
 the only known non-pass, as before; it is covered by the release
 workflow's GPU runners.
+
+## 2026-11-26: second sync (0.11.0 → 0.11.1)
+
+The weekly sync had never fired (the 11-09/16/23 Mondays passed silently after
+the 11-08 Actions re-enable), and the first manual run exposed that the
+11-06/07 sync had landed as single-parent "same-tree" commits, so the merge
+base had fallen back to the fork point. A graft commit re-linked the ancestry
+(tree byte-identical, parents = previous main + `865fa9af`), and the re-run
+took the conflict path: 53 conflicted files, opened as PR #27. This sync
+resolved them locally against upstream/main @ `a3ed0682` (1,386 commits past
+`865fa9af`; upstream's current release is v0.20.1, its workspace version
+0.21.0).
+
+Decisions (the standing rule from the first sync: fork behaviour that must
+survive, upstream features taken where they don't collide):
+
+- `crates/dwg` (fork's `cadcraft-dwg`) restored whole: upstream deleted it for
+  `craft-dwg`, but the fork's OLE preview helpers (`ole_preview_kind`,
+  `ole_emf_bytes`) live there and render/io still call them. The DXF/DWG bridge
+  itself is upstream's `craft-dwg` everywhere.
+- `crates/dxf` deletion accepted (now `craft-dxf` in craft-libs). The fork's
+  `parse_with_progress` / `DxfError::Cancelled` went with it: DXF parsing can
+  no longer be cancelled mid-parse (stage reporting and the before/after and
+  per-section cancel checks stay). Accepted regression, noted in
+  `dxf_read.rs`.
+- `Unknown` keeps both fields: fork's `ole` and upstream's `graphics`
+  (proxy graphics). `prims()` prefers a visible OLE frame, else the proxy
+  graphics; the two never occur on one record.
+- The fork's `editing_text` hook is gone: upstream's `text_editor`
+  (TextEditor/EditorKind) superseded it wholesale, including the fork's
+  in-place TEXT editor in ui-egui (deleted; upstream's `line_editor.rs`
+  replaces it). The fork test now asserts through `text_editor()`.
+- TEXTEDIT gained a box-pick fallback (`curves::pick_text_box_at`): the fork's
+  ink-based distance puts a click in a word gap farther than the aperture
+  from any glyph, so TEXTEDIT rejected box-centre points the UI fed it. The
+  fallback accepts a click inside a text-like object's box (nearest ink
+  first), as AutoCAD does; general picking keeps the ink distance.
+- DWG reads unified on upstream's worker-aware `craft_dwg::decode`: the fork's
+  progress path keeps its stage/cancel checks around the decode, but no
+  longer decodes in-process, so a dying DWG worker ends one open, not the app
+  (upstream's `dwg_worker` test caught the old behaviour).
+- Upstream's `BreakAtPointM` (point pick, AutoCAD 2024 prompts) replaces the
+  fork's audit-era selection-pick version; the fork's typed-fallback test now
+  feeds points.
+- Double-clicking a dimension now starts TEXTEDIT (upstream's dimension
+  editor, #842) instead of the fork's properties-panel hint; the fork test
+  asserts the new behaviour.
+- `ATTDIA` dropped from the header-var table (upstream registers it as a
+  session setting; the merged code reads `settings.attdia`), same as `ATTREQ`
+  in the first sync.
+- Fork commands classified in `file_access/commands.rs` (upstream's new
+  automation-roots gate): `ovimap.import`/`ovimap.export` under FILES,
+  `ovimap.push`/`ovimap.pull` REFUSED (bridge server over the network),
+  `ovimap.inspect`/`ovimap.assign`/`ovimap.georef`/`tilemap` under NO_FILES.
+- Parity-audit probe gate 76 → 80: the four new typed-name errors are all
+  upstream commands registered after the previous sync point, each erroring
+  only with its required parameter (`blocklibimport`, `blocklibrary`,
+  `pastetable`, `pdfimport`); verified against the fork-point registry.
+- `zh.tsv` gained 715 translations for keys upstream added since the previous
+  sync, keeping the fork's full-coverage rule for the Chinese catalog. One
+  fork i18n test now uses Dutch as its "unsupported locale" example (upstream
+  added Polish, the old example).
+- Upstream kittest suites that assert on English labels set
+  `interface_language = English` in their harness (the fork app defaults to
+  Chinese): `blocks_palette` plus six `it` modules, following the pattern
+  already in `accessibility_names`/`bedit_dialog`.
+- Workflows: `release.yml` stays the fork's vendored version. Upstream's
+  nightly dry-run schedule, credits/contributors job, `dry-run` input and
+  services-dispatch token were reviewed and **not** taken (the fork ships
+  unsigned, DMG+MSI only; `contributors.json` is committed in-tree). Upstream's
+  new `nightly.yml`/`nightly-sign.yml` are manual-only with an upstream-repo
+  guard, inert here, kept untouched. `nix.yml`/`packaging-lint.yml` took
+  upstream's versions (no fork stake).
+- `apps/cadcraft/src/open_file.rs` deleted: upstream's `apple_events` module
+  covers Finder-open (with de-dup and tab selection), superseding the fork's.
+- The fork's hand-drawn macOS title (`title_left` + traffic-light constants)
+  and its test are gone: upstream draws the title through
+  `craft_ui::shell::TitleBar` now.
+- Cargo.lock regenerated from upstream's (`cargo update -w`): workspace
+  versions back to the fork sequence, fork-only deps (`ureq`, `cadcraft-dwg`)
+  kept, `crates/dxf` out.
+
+Retest (this machine has no GPU adapter): engine 2,236 passed / 0 failed
+(the parity-audit probe gate among them), ui-egui lib 414 / 0, ui-egui
+integration suites all green (27 targets + the `it` target at 276 / 0),
+io+render 1,375 / 0, doc+fonts 335 / 0, cli 27 / 0, remaining crates
+(color/constraints/dwg/geom/mcp/web/app/xtask) 424 / 0; `cargo clippy
+--workspace --all-targets -- -D warnings` and `cargo fmt --check` clean. The
+standing `gpu_viewport_stencil` environment failure (no wgpu adapter) remains
+the only known non-pass, covered by the release workflow's GPU runners.

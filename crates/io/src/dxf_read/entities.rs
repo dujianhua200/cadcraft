@@ -352,13 +352,10 @@ pub(super) fn entity_with_table_budget(
         other => EntityKind::Unknown(Unknown {
             dxf_type: other.to_string(),
             tags: tags.iter().map(|tg| RawTag { code: tg.code, value: tg.str() }).collect(),
-<<<<<<< HEAD
             // OLE frames are parsed in a post-pass over the finished store
             // (`fill_ole_frames` in the reader), not here.
             ole: None,
-=======
             graphics: Vec::new(),
->>>>>>> upstream/main
         }),
     };
     Some((c, k))

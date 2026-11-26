@@ -648,25 +648,11 @@ mod tests {
     use super::*;
 
     #[test]
-<<<<<<< HEAD
-    fn mac_title_row_centres_and_clears_the_traffic_lights() {
-        // The lights are centred in the row, and content keeps the same gap after them.
-        let margin = (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
-        let lights_end = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT;
-        assert_eq!(MAC_CONTENT_LEFT - lights_end, margin);
-        // A short title is centred; one too wide for that starts after the lights.
-        assert_eq!(title_left(100.0, 1000.0, 200.0), 500.0);
-        assert_eq!(title_left(100.0, 900.0, 800.0), 100.0 + MAC_CONTENT_LEFT);
-    }
-
-    #[test]
     fn toolbar_has_a_one_click_online_map_button() {
         assert!(TOOLBAR.iter().flat_map(|group| group.iter()).any(|(icon, cmd, _, _)| *cmd == "ui.toggle.basemap" && matches!(*icon, Icon::Map)));
     }
 
     #[test]
-=======
->>>>>>> upstream/main
     fn layout_tabs_that_do_not_fit_keep_the_current_one() {
         let w = [50.0; 6];
         // All fit, with or without a current tab.

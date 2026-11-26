@@ -14,12 +14,10 @@ use std::collections::HashMap;
 
 use std::sync::{Arc, Mutex};
 
-<<<<<<< HEAD
+// FORK DIVERGENCE (2026-11-26 sync): keep fork's `EntityKind` import (the VLAX curve
+// code at the end of this file matches on it bare); upstream's `craft_dxf::Tag`
+// (below) replaces the deleted `cadcraft_dxf` crate, so fork's old import goes.
 use cadcraft_doc::{Entity, EntityKind, Handle, Space};
-use cadcraft_dxf::Tag;
-=======
-use cadcraft_doc::{Entity, Handle, Space};
->>>>>>> upstream/main
 use cadcraft_geom::Vec2;
 use craft_dxf::Tag;
 
@@ -1396,30 +1394,6 @@ pub fn load_source(s: &Session, name: &str) -> Option<String> {
     candidates.iter().find_map(|c| super::builtins::read_text_file(dir.join(c)))
 }
 
-#[cfg(test)]
-mod budget_tests {
-    use super::*;
-
-    /// One 64 KB string occurring many times is charged by its length each time.
-    #[test]
-    fn shared_strings_spend_the_conversion_budgets() {
-        let big = Value::str(&"x".repeat(64 << 10));
-        // 600 x 64 KB is over the 32 MiB an entity list may hold; 100 x 64 KB is not.
-        let list = |n: usize| {
-            let mut items = vec![Value::cons(Value::Int(0), Value::str("TEXT"))];
-            items.extend(std::iter::repeat_n(Value::cons(Value::Int(1), big.clone()), n));
-            Value::list(items)
-        };
-        assert!(list_to_groups(&list(600)).is_err());
-        assert!(list_to_groups(&list(100)).is_ok());
-        // 1,000 x 64 KB is 4,096,000 units of the 2,000,000 SETVAR allows; 100 x 64 KB is not.
-        let mut budget = TO_JSON_BUDGET;
-        assert!(to_json_bounded(&Value::list(vec![big.clone(); 1_000]), 0, &mut budget).is_none());
-        let mut budget = TO_JSON_BUDGET;
-        assert!(to_json_bounded(&Value::list(vec![big; 100]), 0, &mut budget).is_some());
-    }
-}
-
 // ---------------- Visual LISP ActiveX (a minimal set) ----------------
 //
 // A VLA object is the entity's name: `vlax-ename->vla-object` returns the ename, so a VLA
@@ -1950,4 +1924,28 @@ pub fn vlax_curve_getendpoint(ctx: &mut Ctx<'_>, a: Vec<Value>) -> Result<Flow, 
     arity(&a, 1, 1)?;
     let Some(e) = curve_entity(ctx, &a[0])? else { return Ok(Flow::Value(Value::Nil)) };
     Ok(Flow::Value(curve_end(&e).map(|p| Value::point(&p)).unwrap_or_default()))
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    /// One 64 KB string occurring many times is charged by its length each time.
+    #[test]
+    fn shared_strings_spend_the_conversion_budgets() {
+        let big = Value::str(&"x".repeat(64 << 10));
+        // 600 x 64 KB is over the 32 MiB an entity list may hold; 100 x 64 KB is not.
+        let list = |n: usize| {
+            let mut items = vec![Value::cons(Value::Int(0), Value::str("TEXT"))];
+            items.extend(std::iter::repeat_n(Value::cons(Value::Int(1), big.clone()), n));
+            Value::list(items)
+        };
+        assert!(list_to_groups(&list(600)).is_err());
+        assert!(list_to_groups(&list(100)).is_ok());
+        // 1,000 x 64 KB is 4,096,000 units of the 2,000,000 SETVAR allows; 100 x 64 KB is not.
+        let mut budget = TO_JSON_BUDGET;
+        assert!(to_json_bounded(&Value::list(vec![big.clone(); 1_000]), 0, &mut budget).is_none());
+        let mut budget = TO_JSON_BUDGET;
+        assert!(to_json_bounded(&Value::list(vec![big; 100]), 0, &mut budget).is_some());
+    }
 }

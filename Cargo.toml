@@ -1,14 +1,14 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+# FORK (dujianhua200/cadcraft): `crates/dwg` stays a member (fork-only OLE preview
+# helpers `ole_preview_kind`/`ole_emf_bytes` live there); `crates/dxf` was deleted
+# upstream (moved to craft-libs as `craft-dxf`) and stays out.
+exclude = ["crates/dxf"]
 # default-members
 
 [workspace.package]
-<<<<<<< HEAD
 version = "0.11.0"
-=======
-version = "0.21.0"
->>>>>>> upstream/main
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -17,6 +17,9 @@ repository = "https://github.com/storytold/cadcraft"
 [workspace.dependencies]
 # internal
 cadcraft-geom = { path = "crates/geom" }
+# FORK (dujianhua200/cadcraft): kept alongside upstream's `craft-dwg` — the fork's
+# OLE preview helpers (`ole_preview_kind`/`ole_emf_bytes`) live in this crate.
+cadcraft-dwg = { path = "crates/dwg" }
 # DXF tags: the shared reader and writer (moved from crates/dxf; craft-libs#791).
 craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "8fa4db64a9bb943520259ea95331a303ba788f21" }
 craft-dwg = { git = "https://github.com/storytold/craft-libs", rev = "8fa4db64a9bb943520259ea95331a303ba788f21" }

@@ -731,7 +731,6 @@ fn space_names_its_tab() {
 }
 
 #[test]
-<<<<<<< HEAD
 fn ole_frame_draws_as_rectangle_and_diagonals() {
     let ole = || {
         EntityKind::Unknown(Unknown {
@@ -751,6 +750,7 @@ fn ole_frame_draws_as_rectangle_and_diagonals() {
                 object_type: 2,
                 preview: None,
             }),
+            graphics: Vec::new(),
         })
     };
     // Rectangle + both diagonals: six segments, so the frame selects and has extents.
@@ -768,7 +768,7 @@ fn ole_frame_draws_as_rectangle_and_diagonals() {
         o.lower_right = o.upper_left;
     }
     assert!(deg.prims().is_empty());
-    assert!(EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None }).prims().is_empty());
+    assert!(EntityKind::Unknown(Unknown { dxf_type: "PROXY".into(), tags: vec![], ole: None, graphics: Vec::new() }).prims().is_empty());
     // Labels: no preview says so; a classified preview does not claim otherwise.
     if let EntityKind::Unknown(u) = &ole() {
         assert_eq!(u.ole.as_ref().unwrap().label(), "OLE 嵌入对象（预览不可用）");
@@ -793,7 +793,9 @@ fn ole_frame_draws_as_rectangle_and_diagonals() {
     } else {
         panic!("expected Unknown");
     }
-=======
+}
+
+#[test]
 fn new_handles_skip_the_files_object_handles() {
     let mut d = Drawing::new_metric();
     let next = d.handseed;
@@ -1107,5 +1109,4 @@ fn layout_lookups_by_name_cost_about_the_same_for_any_table_size() {
     let mut d = Drawing::new_imperial();
     d.layouts = long_names("L").zip(1..).map(|(n, tab)| Layout::new(&n, tab)).collect();
     lookups_by_name_are_quick("L", |n| d.layout(n).is_some());
->>>>>>> upstream/main
 }

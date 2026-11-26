@@ -751,12 +751,13 @@ fn textedit_on_text_exposes_it_to_the_in_place_editor() {
     s.cmdline("0,0").unwrap();
     // A picked TEXT is offered to the in-place editor, exactly like an MTEXT:
     // a double-click must not drop to the "Enter new text" command-line prompt.
-    let offered = s.editing_text().expect("the picked text is offered to the in-place editor");
-    assert_eq!(offered.value, "old");
+    let offered = s.text_editor().expect("the picked text is offered to the in-place editor");
+    assert!(matches!(offered.kind, crate::EditorKind::Line), "a TEXT opens in the one-line editor");
+    assert_eq!(offered.mtext.contents, "old");
     assert!(s.editing_mtext().is_none());
     s.input(Input::Text("new".into())).unwrap();
     assert!(matches!(kind(&s, &t), EntityKind::Text(x) if x.value == "new"));
-    assert!(s.editing_text().is_none(), "the editor closes once the edit lands");
+    assert!(s.text_editor().is_none(), "the editor closes once the edit lands");
     s.cmdline("").unwrap();
     assert!(s.running.is_none());
 }

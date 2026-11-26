@@ -24,7 +24,8 @@ fn drawing() -> CadApp {
     app
 }
 
-fn harness(app: CadApp) -> Harness<'static, CadApp> {
+fn harness(mut app: CadApp) -> Harness<'static, CadApp> {
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     let mut h = Harness::builder()
         .with_context_setup(cadcraft_ui_egui::framework::install_headless)
         .with_size(vec2(1400.0, 900.0))
@@ -293,7 +294,7 @@ fn wait_for(h: &mut Harness<'static, CadApp>, label: &str) {
 #[test]
 fn a_library_is_added_listed_placed_and_removed() {
     use cadcraft_engine::cmd::file::{IoHooks, set_io};
-    set_io(IoHooks { read: read_library, write: |_, _| Err("no writer in this test".into()), plot: None });
+    set_io(IoHooks { read_progress: None, read: read_library, write: |_, _| Err("no writer in this test".into()), plot: None });
     // No settings folder: the real library list is never written.
     cadcraft_engine::settings_dir::set(None);
     let dir = std::env::temp_dir().join(format!("cadcraft-blocks-palette-{}", std::process::id()));

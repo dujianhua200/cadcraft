@@ -23,6 +23,37 @@ pub fn pick_at(s: &Session, p: Vec2) -> Option<Handle> {
     s.pick_object(&s.space(), p, pick_aperture(s)).ok().flatten()
 }
 
+/// The text-like object whose box contains `p` (within the pick aperture), nearest
+/// ink first. TEXTEDIT's fallback when [`pick_at`] misses: the fork's ink-based
+/// distance (see `select::entity_distance`) puts a click in the gap between two
+/// words farther than the aperture from any glyph, but for a text-editing command
+/// a click inside the text's box is a click on that text, as in AutoCAD.
+pub fn pick_text_box_at(s: &Session, p: Vec2) -> Option<Handle> {
+    let d = s.doc().ok()?;
+    let store = d.space(&s.space())?;
+    let ap = pick_aperture(s);
+    let mut best: Option<(f64, Handle)> = None;
+    for e in store.iter() {
+        let text_like = match &e.kind {
+            EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) => true,
+            EntityKind::MLeader(m) => m.text.is_some(),
+            _ => false,
+        };
+        if !text_like || !d.is_visible(e) {
+            continue;
+        }
+        let b = cadcraft_doc::entity_bounds(d, e, 0);
+        if b.is_empty() || !b.expand(ap).contains(p) {
+            continue;
+        }
+        let dist = crate::select::entity_distance(d, e, p, ap);
+        if best.is_none_or(|(bd, _)| dist < bd) {
+            best = Some((dist, e.handle));
+        }
+    }
+    best.map(|(_, h)| h)
+}
+
 pub fn entity(s: &Session, h: Handle) -> Result<Entity> {
     s.doc()?.entity(h).map(|e| (**e).clone()).ok_or_else(|| EngineError::Other("no such object".into()))
 }

@@ -8,11 +8,9 @@ use cadcraft_engine::doc::{Block, Common, Drawing, EntityKind, RawTag, Space, Un
 use serde_json::json;
 
 fn unknown(kind: &str) -> EntityKind {
-<<<<<<< HEAD
-    EntityKind::Unknown(Unknown { dxf_type: kind.into(), tags: vec![RawTag { code: 8, value: "0".into() }], ole: None })
-=======
-    EntityKind::Unknown(Unknown { dxf_type: kind.into(), tags: vec![RawTag { code: 8, value: "0".into() }], graphics: Vec::new() })
->>>>>>> upstream/main
+    // FORK DIVERGENCE (2026-11-26 sync): merged `Unknown` carries both fork's `ole`
+    // and upstream's `graphics`; literals set both (here and below).
+    EntityKind::Unknown(Unknown { dxf_type: kind.into(), tags: vec![RawTag { code: 8, value: "0".into() }], ole: None, graphics: Vec::new() })
 }
 
 #[test]
@@ -134,11 +132,8 @@ fn proxy_entities_are_reported_only_before_2013() {
                 RawTag { code: 90, value: "498".into() },
                 RawTag { code: 91, value: class.to_string() },
             ],
-<<<<<<< HEAD
             ole: None,
-=======
             graphics: Vec::new(),
->>>>>>> upstream/main
         })
     };
     let mut d = Drawing::new_imperial();
@@ -200,11 +195,8 @@ fn saving_sat_text_solids_as_dxf_2013_reports_them() {
             RawTag { code: 1, value: "400 1 1 0".into() },
             RawTag { code: 3, value: "End-of-ACIS-data".into() },
         ],
-<<<<<<< HEAD
         ole: None,
-=======
         graphics: Vec::new(),
->>>>>>> upstream/main
     });
     d.add(&Space::Model, Common::default(), sat).unwrap();
     let mut s = Session::empty();
@@ -234,11 +226,8 @@ fn a_dxf_2013_loss_is_known_before_saving() {
     set_io(IoHooks { read_progress: None, read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     let sat = |d: &mut Drawing| {
         let tags = vec![RawTag { code: 8, value: "0".into() }, RawTag { code: 1, value: "400 1 1 0".into() }];
-<<<<<<< HEAD
-        d.add(&Space::Model, Common::default(), EntityKind::Unknown(Unknown { dxf_type: "REGION".into(), tags, ole: None })).unwrap();
-=======
-        d.add(&Space::Model, Common::default(), EntityKind::Unknown(Unknown { dxf_type: "REGION".into(), tags, graphics: Vec::new() })).unwrap();
->>>>>>> upstream/main
+        d.add(&Space::Model, Common::default(), EntityKind::Unknown(Unknown { dxf_type: "REGION".into(), tags, ole: None, graphics: Vec::new() }))
+            .unwrap();
     };
     let mut modern = Drawing::new_imperial();
     modern.header.set_str("ACADVER", "AC1032");
@@ -274,11 +263,8 @@ fn the_note_counts_the_host_drawing_while_a_block_is_edited() {
             RawTag { code: 1, value: "400 1 1 0".into() },
             RawTag { code: 3, value: "End-of-ACIS-data".into() },
         ],
-<<<<<<< HEAD
         ole: None,
-=======
         graphics: Vec::new(),
->>>>>>> upstream/main
     });
     d.add(&Space::Model, Common::default(), sat).unwrap();
     d.blocks.insert("Door".into(), std::sync::Arc::new(Block::new("Door")));
@@ -300,11 +286,7 @@ fn the_note_counts_the_host_drawing_while_a_block_is_edited() {
 fn a_dwg_keeps_sat_text_solids_only_before_2013() {
     use cadcraft_engine::cmd::file::{Version, not_saved_as};
     let tag = |code: i32, value: &str| RawTag { code, value: value.into() };
-<<<<<<< HEAD
-    let solid = |tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: "3DSOLID".into(), tags, ole: None });
-=======
-    let solid = |tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: "3DSOLID".into(), tags, graphics: Vec::new() });
->>>>>>> upstream/main
+    let solid = |tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: "3DSOLID".into(), tags, ole: None, graphics: Vec::new() });
     let mut d = Drawing::new_imperial();
     d.add(&Space::Model, Common::default(), solid(vec![tag(100, "AcDbModelerGeometry"), tag(1, "700 0 1 0")])).unwrap();
     d.add(&Space::Model, Common::default(), solid(vec![tag(100, "AcDbModelerGeometry"), tag(70, "1")])).unwrap();
@@ -346,7 +328,9 @@ fn ole_objects_are_not_reported() {
 fn saving_data_store_solids_as_dxf_2010_reports_them() {
     use cadcraft_engine::cmd::file::loss_on_save;
     use cadcraft_engine::doc::foreign::Foreign;
-    set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
+    // FORK DIVERGENCE (2026-11-26 sync): fork's `IoHooks` has a `read_progress` hook
+    // upstream lacks; upstream's new tests below pass `None` for it (here and twice more).
+    set_io(IoHooks { read_progress: None, read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     set_write_as(|_, _, _: &SaveAs| Ok(b"x".to_vec()));
     let mut d = Drawing::new_imperial();
     d.header.set_str("ACADVER", "AC1032");
@@ -380,6 +364,7 @@ fn proxy_entity(strings: &str) -> EntityKind {
     EntityKind::Unknown(Unknown {
         dxf_type: "ACAD_PROXY_ENTITY".into(),
         tags: tags.iter().map(|(code, value)| RawTag { code: *code, value: (*value).into() }).collect(),
+        ole: None,
         graphics: Vec::new(),
     })
 }
@@ -388,7 +373,7 @@ fn proxy_entity(strings: &str) -> EntityKind {
 /// proxy out, and the save says so instead of dropping it silently (#3229).
 #[test]
 fn a_dxf_before_2007_reports_the_proxies_it_leaves_out() {
-    set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
+    set_io(IoHooks { read_progress: None, read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     // SAVEAS at a chosen version goes through this hook (each test may run in its own process).
     set_write_as(|_, _, _: &SaveAs| Ok(b"x".to_vec()));
     let mut d = Drawing::new_imperial();
@@ -427,7 +412,7 @@ fn a_pre_2007_dxf_proxy_loss_is_known_before_saving() {
 /// and says so, like a save (#3229).
 #[test]
 fn exporting_a_dxf_before_2007_reports_the_proxies_it_leaves_out() {
-    set_io(IoHooks { read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
+    set_io(IoHooks { read_progress: None, read: |_, _| Err("no reader in this test".into()), write: |_, _| Ok(b"0\nEOF\n".to_vec()), plot: None });
     let drawing = |acadver: &str| {
         let mut d = Drawing::new_imperial();
         d.header.set_str("ACADVER", acadver);

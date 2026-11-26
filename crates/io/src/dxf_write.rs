@@ -151,13 +151,9 @@ pub fn write(d: &Drawing) -> String {
 
 /// The drawing's DXF tags, declaring `version` in `$ACADVER`.
 pub fn tags(d: &Drawing, version: Version) -> Vec<Tag> {
-<<<<<<< HEAD
-    let mut tags = tags_for(d, version, version, version < Version::R2004);
+    let mut tags = tags_kept(d, version).0;
     append_georef(&mut tags, d);
     tags
-=======
-    tags_kept(d, version).0
->>>>>>> upstream/main
 }
 
 /// [`tags`], with the foreign objects the file keeps, by their handles in the drawing.
@@ -175,12 +171,6 @@ fn tags_kept(d: &Drawing, version: Version) -> (Vec<Tag>, std::collections::Hash
 pub const DWG_MAX_LINETYPE_ELEMENTS: usize = 255;
 
 /// The R2000 DXF the DWG bridge converts to a `dwg` version DWG: its entity types are the DWG
-<<<<<<< HEAD
-/// version's (MULTILEADER from 2007).
-pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> String {
-    let mut tags = tags_for(d, Version::R2000, dwg, false);
-    append_georef(&mut tags, d);
-=======
 /// version's (MULTILEADER from 2007), and its linetypes have at most
 /// [`DWG_MAX_LINETYPE_ELEMENTS`] elements.
 pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> (String, craft_dwg::Unwritten) {
@@ -195,12 +185,11 @@ pub(crate) fn dwg_bridge(d: &Drawing, dwg: Version) -> (String, craft_dwg::Unwri
             unwritten.insert("VISUALSTYLE".into(), omitted);
         }
     }
->>>>>>> upstream/main
+    append_georef(&mut tags, d);
     bridge_markers(&mut tags);
     (craft_dxf::write_ascii(&tags), unwritten)
 }
 
-<<<<<<< HEAD
 /// OviMap link (§4.3): the `OVIMAP_GEOREF` dictionary with its GEOREF XRECORD and one
 /// VERTICES_<lineGroupId> XRECORD per track, appended to the OBJECTS section the writer
 /// produced. The split writer has no hook for extra root-dictionary objects, so the
@@ -307,11 +296,6 @@ fn append_georef(tags: &mut Vec<Tag>, d: &Drawing) {
     tags.splice(endsec..endsec, recs);
 }
 
-/// Subclass markers the DWG bridge knows by another spelling (it matches them exactly):
-/// AutoCAD writes a dynamic block lookup parameter's as `AcDbBlockLookUpParameter`, the bridge
-/// reads `AcDbBlockLookupParameter`; otherwise the parameter loses its name and its lookup
-/// action in the DWG, and AutoCAD's lookups stop working.
-=======
 /// Version-specific DWG compatibility omissions, counted from the actual saved view.
 /// Hosts use this before saving and when reporting saves through their byte-only I/O hooks.
 pub fn dwg_compat_lost(d: &Drawing, version: Version) -> craft_dwg::Unwritten {
@@ -368,7 +352,6 @@ fn legacy_visual_style(object: &cadcraft_doc::foreign::ForeignObject) -> bool {
 
 /// Proxy type names and lookup-parameter subclass names must match the bridge reader's spelling.
 /// Ordinary DXF output retains source spellings.
->>>>>>> upstream/main
 fn bridge_markers(tags: &mut [Tag]) {
     for tag in tags.iter_mut().filter(|tag| tag.code == 0) {
         for name in ["ACAD_PROXY_ENTITY", "ACAD_PROXY_OBJECT"] {

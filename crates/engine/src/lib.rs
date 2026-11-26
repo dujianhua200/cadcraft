@@ -39,12 +39,9 @@ pub mod settings_dir;
 pub mod snap;
 pub mod spatial;
 pub mod sysvars;
-<<<<<<< HEAD
 pub mod tilefetch;
 pub mod tilemap;
-=======
 pub mod ucs;
->>>>>>> upstream/main
 pub mod undoctl;
 pub mod units;
 
@@ -383,12 +380,6 @@ impl Session {
     pub fn pixel_size(&self) -> f64 {
         let v = self.state().map(DocState::view).unwrap_or_default();
         v.height / self.viewport_px.1.max(1.0)
-    }
-
-    /// The single-line text the running command is editing, for the in-place editor
-    /// ([`Interactive::editing_text`]).
-    pub fn editing_text(&self) -> Option<cadcraft_doc::Text> {
-        self.running.as_ref().and_then(|r| r.machine.editing_text())
     }
 
     /// Serializable summary for inspect/automation.

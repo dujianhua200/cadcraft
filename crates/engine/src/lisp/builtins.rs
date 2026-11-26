@@ -11,11 +11,9 @@ use std::sync::Arc;
 
 use super::eval::{Ctx, Flow, Special};
 use super::value::{Builtin, BuiltinKind, Sym, Value, charge_bytes, check_string_len, eq, equal, real_text, to_text};
-<<<<<<< HEAD
-use super::{Env, LispError, dcl, drawing, input, read};
-=======
-use super::{Env, LispError, drawing, input, objects, read};
->>>>>>> upstream/main
+// FORK DIVERGENCE (2026-11-26 sync): import union — fork's `dcl` (DCL dialogs) and
+// upstream's `objects` (dictionary access: TBLOBJNAME/DICTSEARCH/…) are both used below.
+use super::{Env, LispError, dcl, drawing, input, objects, read};
 
 macro_rules! cxrs {
     ($($name:ident $path:literal),*) => {
@@ -74,9 +72,16 @@ pub fn decode_text(bytes: &[u8]) -> String {
 /// Read a text file for a routine (`load`, DCL, startup files): byte-capped like
 /// [`files::read_text_file`], but decoded with [`decode_text`] so legacy GBK files
 /// survive. `None` on the web, where native filesystem paths are unavailable.
+///
+/// FORK DIVERGENCE (2026-11-26 sync): upstream's `files::read_text_file` now refuses
+/// paths outside the automation roots (`file_access::check_read`, #1472). This fork
+/// reader (LOAD/DCL/startup, GBK) applies the same gate so confined automation
+/// cannot reach outside its roots through `load`; without roots in force the check
+/// always passes, so interactive GBK loading is unchanged.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read_text_file(path: impl AsRef<std::path::Path>) -> Option<String> {
     const MAX: usize = 64 * 1024 * 1024;
+    crate::file_access::check_read(path.as_ref()).ok()?;
     let bytes = crate::capped_read::read_capped(path.as_ref(), MAX).ok()?;
     Some(decode_text(&bytes))
 }

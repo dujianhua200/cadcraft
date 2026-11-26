@@ -138,25 +138,14 @@ pub(super) fn run_textedit(s: &mut Session, p: &Value) -> Result<Value> {
 #[derive(Default)]
 pub(super) struct TextEditM {
     h: Option<(Handle, String)>,
-    /// The picked MTEXT, when the pick is one: the in-place editor ([`Interactive::editing_mtext`])
-    /// shows at its box while TEXTEDIT asks for the text, instead of the command-line prompt.
-    /// (Fork addition: upstream's TEXTEDIT keeps neither in-place editor hook.)
-    mtext: Option<cadcraft_doc::MText>,
-    /// The picked TEXT, when the pick is one: the in-place editor ([`Interactive::editing_text`])
-    /// shows at its insertion point, so a double-click on a TEXT opens the editor exactly
-    /// like an MTEXT does instead of dropping to the command-line prompt. (Fork addition.)
-    text: Option<cadcraft_doc::Text>,
     /// Edits made in this run, newest last: each object as it was before (the Undo option).
     edits: Vec<(Handle, EntityKind)>,
     /// Single mode: end after one edit (the Mode option; Multiple by default).
     single: bool,
     /// Asking for the edit mode.
     mode: bool,
-<<<<<<< HEAD
-=======
     /// What the in-place editor shows for the picked object (#842).
     editor: Option<crate::TextEditor>,
->>>>>>> upstream/main
 }
 
 impl Interactive for TextEditM {
@@ -164,7 +153,6 @@ impl Interactive for TextEditM {
         "TEXTEDIT"
     }
     /// An MTEXT asking for its new text opens in the in-place editor with its contents.
-    /// (Fork: the same hook also serves the picked TEXT via [`Interactive::editing_text`].)
     fn editing_mtext(&self) -> Option<cadcraft_doc::MText> {
         self.h.as_ref().and(self.editor.as_ref().filter(|e| e.kind == crate::EditorKind::MText).map(|e| e.mtext.clone()))
     }
@@ -172,11 +160,6 @@ impl Interactive for TextEditM {
     /// in-place editor; MTEXT and multileader text in the MTEXT editor.
     fn text_editor(&self) -> Option<crate::TextEditor> {
         if self.mode || self.h.is_none() { None } else { self.editor.clone() }
-    }
-    /// The picked TEXT, while TEXTEDIT waits for its text: the UI's in-place editor
-    /// opens on it (a double-click on TEXT lands here). (Fork addition.)
-    fn editing_text(&self) -> Option<cadcraft_doc::Text> {
-        self.h.as_ref().and(self.text.clone())
     }
     fn prompt(&self, _s: &Session) -> Prompt {
         if self.mode {
@@ -201,27 +184,14 @@ impl Interactive for TextEditM {
         }
         match (&self.h, i) {
             (None, Input::Point(p)) => {
-                let h = curves::pick_at(s, p).ok_or_else(|| other("*Invalid selection*"))?;
+                let h = curves::pick_at(s, p).or_else(|| curves::pick_text_box_at(s, p)).ok_or_else(|| other("*Invalid selection*"))?;
                 // Refused when picked, not after the new text has been typed.
                 if curves::is_locked(s, h) {
                     return Err(other("The object is on a locked layer."));
                 }
-<<<<<<< HEAD
-                let kind = curves::entity(s, h)?.kind;
-                let old = text_of(&kind).ok_or_else(|| other("Select a text, mtext, multileader, attribute definition or dimension."))?;
-                // Fork addition: a picked TEXT opens in the single-line in-place editor.
-                self.text = if let EntityKind::Text(t) = &kind { Some(t.clone()) } else { None };
-                self.mtext = match kind {
-                    EntityKind::MText(m) => Some(m),
-                    // A multileader's text opens in the same editor (#1081).
-                    EntityKind::MLeader(m) => m.text,
-                    _ => None,
-                };
-=======
                 let old = text_of(&curves::entity(s, h)?.kind)
                     .ok_or_else(|| other("Select a text, mtext, multileader, attribute definition or dimension."))?;
                 self.editor = editor_for(s, h);
->>>>>>> upstream/main
                 // The editor would drop part of a text this long, and saving would lose it: the
                 // command line asks for it instead.
                 if self.editor.as_ref().is_some_and(|e| !crate::mtext_edit::Formatted::fits(&e.mtext.contents)) {
@@ -237,22 +207,12 @@ impl Interactive for TextEditM {
                 set_text(s, h, &t)?;
                 self.edits.push((h, before));
                 self.h = None;
-<<<<<<< HEAD
-                self.mtext = None;
-                self.text = None;
-=======
                 self.editor = None;
->>>>>>> upstream/main
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (Some(_), Input::Enter) => {
                 self.h = None;
-<<<<<<< HEAD
-                self.mtext = None;
-                self.text = None;
-=======
                 self.editor = None;
->>>>>>> upstream/main
                 Ok(if self.single { Step::Done } else { Step::Continue })
             }
             (None, Input::Enter) => Ok(Step::Done),

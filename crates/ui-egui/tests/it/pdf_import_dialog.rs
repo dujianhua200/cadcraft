@@ -26,6 +26,7 @@ fn read_pdf(_: &[u8], options: &serde_json::Value) -> Result<(Drawing, usize), S
 fn harness(path: String) -> Harness<'static, CadApp> {
     let services = Services { pick_open: Some(Box::new(move || Some(path.clone()))), ..Services::default() };
     let mut app = CadApp::new(Session::new(), services);
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.start("pdfimport");
     Harness::builder().with_context_setup(cadcraft_ui_egui::framework::install_headless).with_size(egui::vec2(900.0, 700.0)).build_ui_state(
         |ui, app: &mut CadApp| {

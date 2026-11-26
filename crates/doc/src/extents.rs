@@ -447,7 +447,11 @@ fn constant_box(a: &crate::Attrib, upright: bool) -> Bounds2 {
     let turn = |r: f64| if upright { 0.0 } else { r };
     match a.multiline_text() {
         Some(m) if !blank(&m.contents) => mtext_box(&crate::MText { rotation: turn(m.rotation), ..m }),
-        None if !blank(&a.text.value) => text_box(&crate::Text { rotation: turn(a.text.rotation), ..a.text.clone() }, a.text.value.chars().count()),
+        // FORK DIVERGENCE (2026-11-26 sync): upstream wrote this against the old
+        // `text_box(t, len)`; the fork's `text_box(t, s)` measures the renderer's real
+        // per-character advance (a CJK character takes a 1.0 em square cell), so the
+        // value itself is passed here and a constant CJK value is boxed like drawn text.
+        None if !blank(&a.text.value) => text_box(&crate::Text { rotation: turn(a.text.rotation), ..a.text.clone() }, &a.text.value),
         _ => Bounds2::EMPTY,
     }
 }
@@ -883,22 +887,20 @@ mod tests {
     #[test]
     fn ole_frame_counts_in_extents() {
         let tag = |code: i32, value: &str| crate::RawTag { code, value: value.into() };
-<<<<<<< HEAD
-        let frame = |tags: Vec<crate::RawTag>| EntityKind::Unknown(crate::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None });
-=======
-        let frame = |tags: Vec<crate::RawTag>| EntityKind::Unknown(crate::Unknown { dxf_type: "OLE2FRAME".into(), tags, graphics: Vec::new() });
->>>>>>> upstream/main
+        let frame =
+            |tags: Vec<crate::RawTag>| EntityKind::Unknown(crate::Unknown { dxf_type: "OLE2FRAME".into(), tags, ole: None, graphics: Vec::new() });
         let b = bounds(frame(vec![tag(10, "30"), tag(20, "-19"), tag(11, "35"), tag(21, "-22")]));
         assert_eq!((b.min, b.max), (Vec2::new(30.0, -22.0), Vec2::new(35.0, -19.0)));
         assert!(bounds(frame(vec![tag(10, "1"), tag(20, "2")])).is_empty(), "one corner is not a frame");
         assert!(bounds(frame(vec![tag(10, "NaN"), tag(20, "0"), tag(11, "1"), tag(21, "inf")])).is_empty());
         assert!(
-<<<<<<< HEAD
-            bounds(EntityKind::Unknown(crate::Unknown { dxf_type: "OTHER".into(), tags: vec![tag(10, "5"), tag(20, "5")], ole: None })).is_empty()
-=======
-            bounds(EntityKind::Unknown(crate::Unknown { dxf_type: "OTHER".into(), tags: vec![tag(10, "5"), tag(20, "5")], graphics: Vec::new() }))
-                .is_empty()
->>>>>>> upstream/main
+            bounds(EntityKind::Unknown(crate::Unknown {
+                dxf_type: "OTHER".into(),
+                tags: vec![tag(10, "5"), tag(20, "5")],
+                ole: None,
+                graphics: Vec::new()
+            }))
+            .is_empty()
         );
     }
 

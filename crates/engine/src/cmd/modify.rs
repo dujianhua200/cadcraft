@@ -131,87 +131,13 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("breakatpoint", "Break At Point", run_breakat)
             .menu(&["Modify", "Break At Point"])
             .params("{handle, at} → {handles: the object (kept, reshaped) then the new piece}")
-<<<<<<< HEAD
-            .interactive(|_| Ok(Box::<BreakAtPointM>::default())),
-=======
             .interactive(|_| Ok(Box::new(BreakAtPointM::default()))),
->>>>>>> upstream/main
         CommandSpec::new("join", "Join", run_join)
             .menu(&["Modify", "Join"])
             .alias(&["j"])
             .params("{handles?, close?: bool (a single arc becomes its circle, an elliptical arc its full ellipse)}")
             .interactive(|_| Ok(Box::new(SelectThen::new(Op::Join)))),
     ]
-}
-
-/// BREAKATPOINT typed (audit F-class): "Select object:" then "Specify break point:".
-/// The picked object itself is preselected again in AutoCAD; here the break point is
-/// a fresh pick on the same object (object snap applies).
-#[derive(Default)]
-pub struct BreakAtPointM {
-    sel: SelectPhase,
-    begun: bool,
-    target: Option<Handle>,
-}
-
-impl Interactive for BreakAtPointM {
-    fn name(&self) -> &'static str {
-        "BREAKATPOINT"
-    }
-    fn prompt(&self, _s: &Session) -> Prompt {
-        match self.target {
-            Some(_) => Prompt::new("Specify break point", Accept::POINT),
-            None => self.sel.prompt(),
-        }
-    }
-    fn input(&mut self, s: &mut Session, i: Input) -> Result<Step> {
-        if !self.begun {
-            self.begun = true;
-            let b = SelectPhase::begin(s);
-            if b.done {
-                self.target = b.picked.first().copied();
-                if self.target.is_none() {
-                    return Ok(Step::Done);
-                }
-                // Fall through: this input is already the break point.
-                self.sel = b;
-                return match i {
-                    Input::Point(p) => self.break_at(s, p),
-                    Input::Cancel => Ok(Step::Done),
-                    _ => Ok(Step::Continue),
-                };
-            }
-            self.sel = SelectPhase { single: true, ..b };
-        }
-        match self.target {
-            None => match self.sel.feed(s, &i)? {
-                SelOutcome::More => Ok(Step::Continue),
-                SelOutcome::Empty => Ok(Step::Done),
-                SelOutcome::Done(hs) => {
-                    self.target = hs.first().copied();
-                    Ok(if self.target.is_some() { Step::Continue } else { Step::Done })
-                }
-            },
-            Some(_) => match i {
-                Input::Point(p) => self.break_at(s, p),
-                Input::Cancel | Input::Enter => Ok(Step::Done),
-                _ => Ok(Step::Continue),
-            },
-        }
-    }
-}
-
-impl BreakAtPointM {
-    fn break_at(&mut self, s: &mut Session, p: Vec2) -> Result<Step> {
-        let Some(h) = self.target else { return Ok(Step::Done) };
-        match run_breakat(s, &json!({ "handle": h.hex(), "at": [p.x, p.y] })) {
-            Ok(_) => Ok(Step::Done),
-            Err(e) => {
-                s.echo(e.to_string());
-                Ok(Step::Continue)
-            }
-        }
-    }
 }
 
 pub(crate) fn _unused(_: Circle) {}

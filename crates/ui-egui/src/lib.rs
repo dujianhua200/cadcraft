@@ -37,25 +37,18 @@ pub mod dialogs;
 pub mod docking;
 mod drawing_fonts;
 pub mod fault;
-<<<<<<< HEAD
 pub mod find;
-=======
 pub mod framework;
->>>>>>> upstream/main
 // The Find and Replace window behind the FIND command.
 pub mod arraydlg;
 pub mod finddlg;
 pub mod hatchdlg;
-<<<<<<< HEAD
-pub mod mapsources;
-=======
 mod line_editor;
->>>>>>> upstream/main
+pub mod mapsources;
 mod mtext_editor;
 mod panel_state;
 pub mod spacemouse;
 pub mod switch;
-mod text_editor;
 // The Edit Text window, opened from the shortcut menu's Edit Text entry.
 pub mod textdlg;
 // The External References palette.
@@ -402,7 +395,6 @@ pub struct CadApp {
     pub array_dlg: Option<arraydlg::ArrayDlgState>,
     /// The Edit Block Definition dialog ([`bedit`]).
     pub bedit: bedit::State,
-<<<<<<< HEAD
     /// Draft latitude/longitude while the one-click online map's centre
     /// dialog is open ([`basemap`]); `None` when it is closed.
     pub basemap_georef: Option<basemap::GeorefDraft>,
@@ -412,12 +404,10 @@ pub struct CadApp {
     /// The Map Sources dialog's working draft ([`mapsources`]); `None` when
     /// it is closed.
     pub map_source_dialog: Option<mapsources::MapSourceDialog>,
-=======
     /// The Write Block dialog ([`wblock`]).
     pub wblock: wblock::State,
     /// A file dialog shown with [`Services::start_pick`]: its answer, and what to do with it.
     pending_pick: Option<PendingPick>,
->>>>>>> upstream/main
     /// The startup update check and its prompt (desktop; [`updates_ui`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub updates_rt: updates_ui::Runtime,
@@ -485,13 +475,10 @@ impl CadApp {
             hatch_dlg: None,
             array_dlg: None,
             bedit: bedit::State::default(),
-<<<<<<< HEAD
             basemap_georef: None,
             map_sources: cadcraft_doc::gis::MapSourceLibrary::default(),
             map_source_dialog: None,
-=======
             wblock: wblock::State::default(),
->>>>>>> upstream/main
             #[cfg(not(target_arch = "wasm32"))]
             updates_rt: updates_ui::Runtime::default(),
             pending_pick: None,
@@ -1619,7 +1606,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn map_sources_persist_across_restarts() {
         let mut a = app();
         // A user-added GCJ-02 source, made current, survives a prefs round trip.
@@ -1639,7 +1625,9 @@ mod tests {
         assert_eq!(b.run("ui.dialog.mapsources", json!(null)).ok(), Some(Value::Null));
         assert!(b.map_source_dialog.is_some());
         assert_eq!(b.map_source_dialog.as_ref().map(|d| d.library.current_id.clone()), Some("osm".to_string()));
-=======
+    }
+
+    #[test]
     fn options_reset_brings_the_interface_back() {
         // Hiding the interface (View/Window toggles) can leave no way back — on Windows the
         // in-window menu bar is the only menu there is. Options > Reset must restore it (#1240).
@@ -1687,6 +1675,5 @@ mod tests {
         assert_eq!(a.ui.shortcuts.get("line").map(String::as_str), Some("Ctrl+Shift+L"), "the reset lost a user shortcut");
         assert_eq!(a.ui.last_lisp_dir.as_deref(), Some("lisp-folder"));
         assert_eq!(a.ui.last_pgp_dir.as_deref(), Some("pgp-folder"));
->>>>>>> upstream/main
     }
 }

@@ -39,6 +39,10 @@ pub const FILES: &[&str] = &[
     "new",
     "open",
     "options",
+    // FORK (dujianhua200/cadcraft): the OviMap import reads the file it is given,
+    // and the export writes the file it is given.
+    "ovimap.import",
+    "ovimap.export",
     "pagesetup",
     "pdfbook",
     "pdfimport",
@@ -67,6 +71,10 @@ pub const FILES: &[&str] = &[
 pub const REFUSED: &[(&str, &str)] = &[
     ("drawingrecovery", "it works on the autosave folder (SAVEFILEPATH), which is the server's own"),
     ("blocklibraries", "it keeps its list of libraries in the settings folder, which is the server's own"),
+    // FORK (dujianhua200/cadcraft): the OviMap bridge commands talk to a server
+    // over the network, which the roots cannot hold.
+    ("ovimap.push", "it sends the drawing to the OviMap bridge server over the network, which the roots cannot hold"),
+    ("ovimap.pull", "it fetches from the OviMap bridge server over the network, which the roots cannot hold"),
 ];
 
 /// Commands that touch no file.
@@ -497,6 +505,13 @@ pub const NO_FILES: &[&str] = &[
     "constraintinfer",
     "constraints.inspect",
     "constraints.dof",
+    // FORK (dujianhua200/cadcraft): the OviMap link commands and the tile-layer
+    // switch touch no file (the link lives in the drawing; tiles are fetched by
+    // the UI's background loader, not by these commands).
+    "ovimap.inspect",
+    "ovimap.assign",
+    "ovimap.georef",
+    "tilemap",
 ];
 
 /// Why command `id` may not run here; `None` when it may. Without roots in force everything may.

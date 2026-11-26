@@ -43,11 +43,11 @@ const HEADER: &[(&str, Kind, Def)] = &[
     ("CENTEREXE", Kind::Real { min: 0.0, strict: false }, Def::Units(0.12, 3.5)),
     // Routines read and write these (the engine keeps them in the header, default on).
     ("CMDECHO", Kind::Choice(&[0, 1]), Def::Int(1)),
-    ("ATTDIA", Kind::Choice(&[0, 1]), Def::Int(1)),
-    // ATTREQ is not here: upstream registers it as a session setting (SETTINGS
-    // below, read via `settings.attreq`), and the merged code consumes that
-    // path. The fork's older header registration would duplicate the name and
-    // shadow the setting, so it was dropped in the 2026-11-06 sync.
+    // ATTDIA and ATTREQ are not here: upstream registers them as session settings
+    // (SETTINGS below, read via `settings.attdia` / `settings.attreq`), and the
+    // merged code consumes that path. The fork's older header registrations would
+    // duplicate the names and shadow the settings, so they were dropped (ATTREQ in
+    // the 2026-11-06 sync, ATTDIA in the 2026-11-26 sync).
     ("FILLMODE", Kind::Choice(&[0, 1]), Def::Int(1)),
     ("CHAMFERA", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),
     ("CHAMFERB", Kind::Real { min: 0.0, strict: false }, Def::Real(0.0)),

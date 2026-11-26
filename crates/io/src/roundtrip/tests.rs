@@ -42,11 +42,8 @@ fn drawing() -> Drawing {
         EntityKind::Unknown(Unknown {
             dxf_type: "ACME_WIDGET".into(),
             tags: vec![tag(100, "AcDbEntity"), tag(10, "1.0"), tag(20, "2.0")],
-<<<<<<< HEAD
             ole: None,
-=======
             graphics: Vec::new(),
->>>>>>> upstream/main
         }),
     )
     .unwrap();
@@ -528,12 +525,8 @@ fn corpus_round_trip_report() {
 #[test]
 fn types_the_dwg_writer_cannot_write_are_reported_lost() {
     use corpus::{CorpusReport, FileReport, Format, round_trip};
-<<<<<<< HEAD
-    let unknown = |t: &str, tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: t.into(), tags, ole: None });
-=======
     crate::dwg_worker::allow_in_process();
-    let unknown = |t: &str, tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: t.into(), tags, graphics: Vec::new() });
->>>>>>> upstream/main
+    let unknown = |t: &str, tags: Vec<RawTag>| EntityKind::Unknown(Unknown { dxf_type: t.into(), tags, ole: None, graphics: Vec::new() });
     let mut d = Drawing::new_metric();
     let widget = vec![tag(100, "AcDbEntity"), tag(100, "AcmeWidget"), tag(10, "1.0"), tag(20, "2.0"), tag(30, "0.0")];
     d.add(&Space::Model, Common::default(), unknown("ACME_WIDGET", widget.clone())).unwrap();

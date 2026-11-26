@@ -25,34 +25,9 @@ pub(super) fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOption
     if points.is_finite() { points } else { 0.0 }
 }
 
-<<<<<<< HEAD
 // Fork: upstream's `edit_text_at` was here; the canvas root module carries a
 // superset (locked-layer hint + dimension double-click opens Properties) under
 // the same name, which is the one the canvas calls. Removed as a dead duplicate.
-=======
-/// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
-/// Start TEXTEDIT on the text, mtext, attribute definition, dimension or multileader text at `p`
-/// (the objects its shortcut menu offers Edit Text for, multileaders, #1081, and dimensions, #842);
-/// false when there is none.
-pub(super) fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
-    use cadcraft_engine::doc::EntityKind;
-    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
-        app.session.doc().ok()?.entity(h).map(|e| match &e.kind {
-            EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Dimension(_) => true,
-            EntityKind::MLeader(m) => m.text.is_some(),
-            _ => false,
-        })
-    });
-    if is_text != Some(true) {
-        return false;
-    }
-    app.start("textedit");
-    if let Err(e) = app.session.input(Input::Point(p)) {
-        app.session.echo(e.to_string());
-    }
-    true
-}
->>>>>>> upstream/main
 
 /// The hatch under world point `w` within the pick aperture (PICKBOX × 1.5 pixels at `scale`
 /// pixels per unit), if any.

@@ -11,6 +11,7 @@ use serde_json::json;
 #[test]
 fn page_setup_switches_an_arch_d_sheet_to_millimetres() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("units", json!({ "insunits": 4 })).unwrap();
     app.run("pagesetup", json!({ "layout": "Layout1", "paper": "ARCH D", "landscape": true })).unwrap();
     let inch = cadcraft_render::sheet(app.session.doc().unwrap(), "Layout1").unwrap();
@@ -41,6 +42,7 @@ fn page_setup_switches_an_arch_d_sheet_to_millimetres() {
 #[test]
 fn page_setup_switches_a_metric_drawing_sheet_to_inches() {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("setvar", json!({ "name": "MEASUREMENT", "value": 1 })).unwrap();
     app.run("pagesetup", json!({ "layout": "Layout1", "paper": "ARCH D", "landscape": true })).unwrap();
     let mm = cadcraft_render::sheet(app.session.doc().unwrap(), "Layout1").unwrap();
@@ -72,6 +74,7 @@ fn clicking_the_inherited_paper_units_records_the_choice() {
     // selected Inches radio must record that choice, so a later MEASUREMENT change cannot flip
     // the sheet to millimetres (#3249).
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     app.run("pagesetup", json!({ "layout": "Layout1", "paper": "ARCH D", "landscape": true })).unwrap();
     assert_eq!(app.session.doc().unwrap().layout("Layout1").unwrap().page.paper_mm, None);
     app.start("pagesetup");

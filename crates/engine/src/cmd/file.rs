@@ -423,23 +423,19 @@ pub fn finish_open(s: &mut Session, f: ReadFile) -> Result<Value> {
 
 /// Parse a drawing's bytes, and search its folder for fonts where the automation roots allow.
 fn read_bytes(bytes: &[u8], name: &str, path: Option<String>) -> Result<ReadFile> {
-<<<<<<< HEAD
     read_bytes_with_progress(bytes, name, path, None)
 }
 
 fn read_bytes_with_progress(bytes: &[u8], name: &str, path: Option<String>, progress: Option<&cadcraft_doc::OpenProgress>) -> Result<ReadFile> {
-    let hooks = io().ok_or_else(|| bad("open", "file formats are not available in this build"))?;
-    let drawing = match (progress, hooks.read_progress) {
-        (Some(p), Some(read)) => read(bytes, name, p).map_err(|e| bad("open", e))?,
-        _ => (hooks.read)(bytes, name).map_err(|e| bad("open", e))?,
-=======
     let drawing = match super::exchange::open_pdf(bytes) {
         Some(result) => result.map_err(|e| bad("open", e))?,
         None => {
             let hooks = io().ok_or_else(|| bad("open", "file formats are not available in this build"))?;
-            (hooks.read)(bytes, name).map_err(|e| bad("open", e))?
+            match (progress, hooks.read_progress) {
+                (Some(p), Some(read)) => read(bytes, name, p).map_err(|e| bad("open", e))?,
+                _ => (hooks.read)(bytes, name).map_err(|e| bad("open", e))?,
+            }
         }
->>>>>>> upstream/main
     };
     // A file that isn't a drawing (an imported SVG) gives the drawing no file name: QSAVE then
     // asks where to save instead of exporting over the original.
@@ -1023,8 +1019,6 @@ pub fn loss_on_save(s: &Session, path: &str) -> std::collections::BTreeMap<Strin
     s.doc().map(|d| not_saved_as(d, version)).unwrap_or_default()
 }
 
-<<<<<<< HEAD
-=======
 /// What a DXF of `version` leaves out of the drawing a save writes: the host while the Block
 /// Editor is open ([`dxf_lost`]).
 fn host_dxf_lost(s: &Session, version: Version) -> std::collections::BTreeMap<String, usize> {
@@ -1108,7 +1102,6 @@ pub(crate) fn lost_message(path: &str, version: Version, lost: &std::collections
     Some(parts.join(" "))
 }
 
->>>>>>> upstream/main
 /// Whether saving to `path` leaves out the entities [`not_saved`] counts: DWG does (the DWG
 /// bridge drops types it doesn't know); DXF writes them back as read.
 pub fn drops_unknown(path: impl AsRef<std::path::Path>) -> bool {
@@ -1139,17 +1132,6 @@ pub(super) fn new_folder(path: &str) -> Option<String> {
 
 /// Say on the command line that the file went into a folder that didn't exist, so a mistyped path
 /// is noticed, and name the folder in the result's `createdFolder`.
-pub(super) fn report_loss(s: &mut Session, r: &mut Value, path: &str) {
-    if is_dxf_file(path) {
-        if drawing_version(s, path) >= Version::R2013 {
-            report_sat_text_dropped(s, r);
-        }
-    } else {
-        let lost = loss_on_save(s, path);
-        report_not_saved(s, r, &lost);
-    }
-}
-
 pub(super) fn report_new_folder(s: &mut Session, r: &mut Value, folder: Option<String>) {
     let Some(folder) = folder else { return };
     s.echo(format!("Created the folder {folder}, which did not exist. Check the path if you did not mean to."));

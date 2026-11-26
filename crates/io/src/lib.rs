@@ -36,13 +36,9 @@ use cadcraft_geom::Bounds2;
 use std::path::{Path, PathBuf};
 
 pub use cadcraft_doc::Format;
-<<<<<<< HEAD
 pub use cadcraft_doc::{OpenProgress, OpenStage};
-pub use cadcraft_dxf::Version;
-=======
 pub use craft_dxf::Version;
 pub use dxf_raw::{ObjectRecord, object_records};
->>>>>>> upstream/main
 pub use dxf_read::entity_from_groups;
 pub use dxf_write::{DWG_MAX_LINETYPE_ELEMENTS, dwg_compat_lost, dwg_notes, entity_groups, proxies_lost};
 pub use pdf::{PdfOptions, pdf, plot};
@@ -110,18 +106,24 @@ pub fn read(bytes: &[u8], name: impl AsRef<Path>) -> Result<Drawing> {
 /// A cancelled read returns [`IoError::Cancelled`] and no drawing.
 pub fn read_with_progress(bytes: &[u8], name: impl AsRef<Path>, progress: &OpenProgress) -> Result<Drawing> {
     let name = name.as_ref();
-    if cadcraft_dwg::is_dwg(bytes) {
+    if craft_dwg::is_dwg(bytes) {
         progress.set_stage(OpenStage::DwgDecode);
         if progress.is_cancelled() {
             return Err(IoError::Cancelled);
         }
-        let (dxf, notes) = cadcraft_dwg::dwg_to_dxf_noted(bytes, cadcraft_dwg::Limits::DEFAULT).map_err(IoError::Format)?;
+        // FORK DIVERGENCE (2026-11-26 sync): the fork's progress path keeps its stage
+        // and cancellation checks around the decode, but the decode itself is
+        // upstream's worker-aware `decode` (as in `read_source` below), so a dying
+        // DWG worker ends this open, not the app.
+        let (dxf, notes) = craft_dwg::decode(bytes, craft_dwg::Limits::DEFAULT).map_err(dwg_error)?;
         if progress.is_cancelled() {
             return Err(IoError::Cancelled);
         }
+        // The decoder writes an elliptic hatch edge's angles in radians; DXF keeps degrees.
+        let dxf = dwg_hatch::elliptic_edge_degrees(dxf);
         let mut d =
             dxf_read::read_with_progress(&dxf, Some(progress)).map_err(|e| IoError::Format(format!("{e} (in the DXF converted from this DWG)")))?;
-        d.read_notes.extend(notes);
+        d.read_notes.extend(notes.iter().map(|note| cadcraft_dwg_message(note)));
         progress.set_stage(OpenStage::Done);
         return Ok(d);
     }

@@ -38,13 +38,8 @@ use list::{preview_options, prims_of};
 use pick::{hatch_at, wheel_zoom_points};
 #[cfg(test)]
 use viewport::viewport_highlight_tolerance;
-<<<<<<< HEAD
-use viewport::{VpContent, VpHighlight, draw_vp_content, ensure_vp_content};
-use widgets::{draw_ucs_icon, draw_viewcube, tile_rects, tile_xf, viewport_label};
-=======
 use viewport::{HoverPart, VpContent, VpHighlight, draw_vp_content, ensure_vp_content};
-use widgets::{draw_tiles, draw_ucs_icon, draw_viewcube, tile_rects, tile_xf, viewport_label};
->>>>>>> upstream/main
+use widgets::{draw_ucs_icon, draw_viewcube, tile_rects, tile_xf, viewport_label};
 
 /// World ↔ screen transform for the canvas rect.
 #[derive(Clone, Copy, Debug)]
@@ -190,18 +185,13 @@ pub struct CanvasState {
     hover_frozen: Vec<String>,
     /// Constraint glyphs for the parametric overlay (cached per drawing revision).
     pub param: crate::parametric::Cache,
-<<<<<<< HEAD
     /// Basemap tile textures + failed-tile back-off (see [`crate::tiles`]).
     pub(crate) tilemap: crate::tiles::TileCache,
-    /// A selection window opened by a press-and-drag, to close where the button is let go.
-    drag_window: bool,
     /// A freehand TRIM/EXTEND drag path being collected (world points): a press that
     /// never really moves stays a click, decided by the path's on-screen length.
     drag_trim: Option<Vec<Vec2>>,
-=======
     /// The primary-button press being held, when it was acted on (see [`press`]).
     press: Option<press::Press>,
->>>>>>> upstream/main
     /// The right-click that opened the shortcut menu held Shift or Ctrl: it is the object snap
     /// menu ([`crate::context_menu`]).
     pub snap_menu: bool,
@@ -660,17 +650,12 @@ fn handle_double_click(app: &mut CadApp, ctx: DoubleClickContext<'_>) -> Option<
         if !in_active {
             app.canvas.hot_grips.clear();
             app.session.pending_window = None;
-<<<<<<< HEAD
-            app.canvas.drag_window = false;
+            app.canvas.press = None;
             if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_ok() {
                 // First double-click inside a layout viewport only enters model space;
                 // say so (in the user's language) instead of silently doing nothing.
                 app.session.echo(crate::i18n::t("Entered model space (MSPACE). Double-click the object again to edit it."));
             } else if active_viewport.is_some() {
-=======
-            app.canvas.press = None;
-            if app.run("mspace", serde_json::json!({"at": [pp.x, pp.y]})).is_err() && active_viewport.is_some() {
->>>>>>> upstream/main
                 let _ = app.run("pspace", serde_json::json!({}));
             }
             app.session.pending_window = None;
@@ -1027,7 +1012,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
     }
     let idle_double = dbl_primary && app.session.running.is_none();
     let grip_clicks = !hatch_dialog && !idle_double;
-    let click_used = handle_presses(app, ui, &PressContext { rect, xf, inside, middle_down, mods, grip_clicks });
+    // Fork: while TRIM/EXTEND waits for picks, a press may become a freehand drag path
+    // ([`update_drag_trim`]); the press-first handling must not act on it at button-down.
+    let drag_trimming = app.session.drag_trim_active() && app.cmd.options.is_none() && app.cmd.buffer.is_empty();
+    let click_used = !drag_trimming && handle_presses(app, ui, &PressContext { rect, xf, inside, middle_down, mods, grip_clicks });
 
     let drag_path_done = update_drag_trim(app, ui, &resp, &xf, inside, middle_down, hover_pos);
     let (raw_world, dyn_frame) = update_canvas_cursor(app, ui, &xf, inside, hover_pos);
@@ -1050,28 +1038,9 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
         app.session.pending_window = None;
         app.canvas.press = None;
     }
-<<<<<<< HEAD
     let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl && drag_path_done.is_none();
-    let key: CycleKey = (
-        app.session.running.as_ref().map(|r| r.id.clone()),
-        app.session.current_prompt().map(|p| p.message),
-        app.session.state().map_or(0, |st| st.uid),
-        app.session.state().map_or(0, |st| st.revision),
-        xf.center,
-        xf.scale,
-    );
-    if app.canvas.cycle_key.as_ref() != Some(&key) {
-        app.canvas.cycle = None;
-        app.canvas.hover_cycle = None;
-        app.canvas.cycle_key = Some(key);
-    }
-    let cycled = pressed_primary && !middle_down && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
-    // Clicks.
-=======
-    let pressed_primary = pressed_primary && !picked && !hatch_dialog && !idle_dbl;
     let cycled = pressed_primary && !click_used && !middle_down && cycle_click(app, &xf, hover_pos, raw_world.filter(|_| inside), mods.shift);
     // Clicks the presses above left alone: on grips, and during ZOOM Realtime.
->>>>>>> upstream/main
     if inside
         && pressed_primary
         && !click_used
@@ -1112,47 +1081,10 @@ pub fn show(app: &mut CadApp, ui: &mut egui::Ui) {
             app.session.echo(e.to_string());
         }
     }
-<<<<<<< HEAD
-    // Press-and-drag selection window (PICKDRAG = 2; click-click still works): a drag
-    // that starts while objects are being selected opens a window where the button went down,
-    // and letting go closes it. Drags on grips and drags while drawing are left alone.
-    if !app.session.settings.pickdrag {
-        app.canvas.drag_window = false;
-    }
-    if app.session.settings.pickdrag
-        && resp.drag_started_by(egui::PointerButton::Primary)
-        && !middle_down
-        && app.canvas.drag_trim.is_none()
-        && app.canvas.cycle.is_none()
-        && app.session.pending_window.is_none()
-        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
-        && rect.contains(origin)
-        && grip_at(app, &xf, Some(origin)).is_none()
-        && crate::dyngrips::at(app, &xf, Some(origin)).is_none()
-    {
-        app.canvas.drag_window = app.session.begin_window(xf.to_world(origin));
-    }
-    if app.canvas.drag_window && resp.drag_stopped_by(egui::PointerButton::Primary) {
-        app.canvas.drag_window = false;
-        if app.session.pending_window.is_some()
-            && let Some(end) = ui.input(|i| i.pointer.interact_pos())
-        {
-            let end = xf.to_world(end);
-            let done = if app.session.prompting() { app.session.input(Input::Point(end)) } else { app.session.idle_click(end, mods.shift) };
-            if let Err(e) = done {
-                app.session.echo(e.to_string());
-            }
-        }
-    }
-    // Right-click acts as Enter while a command runs (the classic CAD default; held, it opens the
-    // command menu); otherwise it opens the shortcut menu (Repeat, Clipboard, …).
-    // Shift/Ctrl+right-click opens the object snap menu.
-=======
     // A quick right-click is Enter (the classic CAD default): it enters what was typed, ends the
     // input of a running command, and between commands repeats the last one. Held, it opens the
     // command menu or the shortcut menu (Repeat, Clipboard, …). Shift/Ctrl+right-click opens the
     // object snap menu.
->>>>>>> upstream/main
     let idle = !app.session.prompting();
     if inside && pressed_secondary {
         app.canvas.snap_menu = mods.shift || mods.ctrl;
@@ -1554,11 +1486,11 @@ fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
                 if locked_hint(app, h, &e) {
                     return true;
                 }
-                // A dimension has no in-place editor: select it and open its Properties
-                // panel, as AutoCAD's double-click does — never silently nothing.
-                app.session.set_selection(vec![h]);
-                let _ = crate::docking::command(app, false, &serde_json::json!({"operation": "open", "panel": "properties"}));
-                app.session.echo(crate::i18n::t("Opened the Properties panel for the dimension. Edit its text override and style there."));
+                // A dimension's text edits in place now (TEXTEDIT's dimension editor, #842).
+                app.start("textedit");
+                if let Err(e) = app.session.input(Input::Point(p)) {
+                    app.session.echo(e.to_string());
+                }
                 true
             }
             EntityKind::Insert(_) => {
@@ -1969,12 +1901,13 @@ mod hatch_pick_tests {
     }
 
     #[test]
-    fn double_clicking_a_dimension_opens_its_properties_panel() {
+    fn double_clicking_a_dimension_starts_textedit_on_it() {
         let mut app = CadApp::new(Session::new(), Services::default());
         let dh =
             app.session.execute("dimlinear", &json!({ "p1": [0, 0], "p2": [10, 0], "at": [5, -2] })).unwrap()["handle"].as_str().unwrap().to_string();
         let _ = app.session.zoom_extents();
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx);
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
         let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
             app.logic(&ctx);
@@ -1992,8 +1925,10 @@ mod hatch_pick_tests {
         frame(&mut app, vec![button(true), button(false)], 0.3);
         frame(&mut app, Vec::new(), 0.4);
         assert_eq!(app.session.selection().iter().map(|h| h.hex()).collect::<Vec<_>>(), vec![dh]);
-        assert!(app.session.log.iter().any(|l| l.contains("属性面板")), "no properties hint in {:?}", app.session.log);
-        assert!(app.session.running.is_none(), "double-click starts no command");
+        // Upstream behaviour adopted at the 2026-11-26 sync: a dimension's text
+        // edits in place through TEXTEDIT (its dimension editor, #842), where
+        // the fork used to point at the properties panel instead.
+        assert_eq!(app.session.running.as_ref().map(|r| r.machine.name()), Some("TEXTEDIT"), "log: {:?}", app.session.log);
     }
 
     #[test]
@@ -2003,6 +1938,7 @@ mod hatch_pick_tests {
         let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
         let _ = app.session.zoom_extents();
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx);
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
         let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
             app.logic(&ctx);
@@ -2069,6 +2005,7 @@ mod drag_trim_tests {
         app.session.cmdline("trim").unwrap();
         assert!(app.session.drag_trim_active());
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx);
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
         let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
             app.logic(&ctx);

@@ -21,6 +21,7 @@ fn handle(v: &Value) -> Handle {
 
 fn harness() -> (Harness<'static, CadApp>, Drawing) {
     let mut app = CadApp::new(Session::new(), Services::default());
+    app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English; // English for upstream's label-driven assertions (the fork app defaults to Chinese).
     let text = handle(&app.run("text", json!({ "at": [0, 0], "text": "HELLO", "height": 2.5 })).unwrap());
     let attdef = handle(&app.run("attdef", json!({ "tag": "TAG", "default": "D1", "at": [0, 10], "height": 2.5 })).unwrap());
     let dim = handle(&app.run("dimlinear", json!({ "p1": [0, -10], "p2": [20, -10], "at": [10, -14] })).unwrap());

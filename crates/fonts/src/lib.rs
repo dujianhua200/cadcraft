@@ -542,7 +542,6 @@ pub fn shape_line_dir(font: &TextFont, s: &str, height: f64, width_factor: f64, 
     shape_stroke_dir(s, height, width_factor, oblique, base_rtl)
 }
 
-<<<<<<< HEAD
 /// Convert a GDI-style **em** height (a LOGFONT `|lfHeight|`: the size at which a
 /// full-width glyph advances one em) into the **cap** height this crate shapes text
 /// at, for `font`. The stroke face draws its glyphs to the height given, so it
@@ -556,10 +555,7 @@ pub fn em_to_cap(font: &TextFont, em: f64) -> f64 {
         TextFont::Stroke | TextFont::Shx(_) => em,
     }
 }
-/// Single-line TEXT (and attributes) runs left to right, as AutoCAD lays it out: neutral
-=======
 /// Single-line TEXT (and attributes) runs left to right, as `AutoCAD` lays it out: neutral
->>>>>>> upstream/main
 /// characters before a right-to-left word ("- " in "- פרוייקט") stay on its left (#2500).
 const TEXT_BASE_RTL: Option<bool> = Some(false);
 
@@ -804,7 +800,6 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn em_to_cap_scales_outline_faces_and_passes_the_stroke_face_through() {
         // The stroke face draws to the height given: no conversion.
         assert_eq!(em_to_cap(&TextFont::Stroke, 195.0), 195.0);
@@ -818,13 +813,15 @@ mod tests {
             let cap = em_to_cap(&song, 195.0);
             assert!((cap - 195.0 * ratio).abs() < 1e-9);
             assert!(cap < 195.0, "an em height must shrink to the cap height, got {cap}");
-=======
+        }
+    }
+
+    #[test]
     fn two_point_middle_vertical_spans_points() {
         for h in [Align::Aligned, Align::Fit] {
             let p = TextParams { h, v: VAlign::Middle, align_pt: Some(Vec2::new(12.0, 5.0)), ..TextParams::new(Vec2::ZERO, 2.0) };
             let (shaped, _) = place(&TextFont::Stroke, "SYNTHETIC", &p);
             assert!((shaped.width - p.insert.dist(p.align_pt.unwrap())).abs() < 1e-9);
->>>>>>> upstream/main
         }
     }
 
