@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-26
+
+### Changed
+
+- **Upstream baseline: `storytold/cadcraft` `main` @ `a3ed0682`
+  (2026-11-26) — upstream v0.20.1 plus later main commits (upstream
+  workspace version 0.21.0).** This fork's version line stays its own
+  (0.11.1); the baseline named here is the upstream code this release
+  contains.
+- **Upstream sync (second)**: merged 1,386 upstream commits past the
+  0.11.0 baseline, resolving 53 conflicted files (PR #27). All fork
+  features are retained: Chinese UI by default, Song-family font
+  unification, map sources/GIS + OviMap link, TILEMAP, AutoLISP (GBK,
+  DCL, VLAX minimal set), OLE/EMF previews, drag-trim, glyph-ink text
+  picking and the parity-audit command prompt streams. Behaviour taken
+  from upstream where it superseded the fork's: TEXTEDIT is the in-place
+  editor for TEXT/MTEXT/ATTDEF/multileader text and dimensions
+  (double-clicking a dimension edits its text), DWG reads run in the
+  isolated worker process, BREAKATPOINT picks its object by point, and
+  the fork's in-place TEXT editor gave way to upstream's editor. The DXF
+  parser is upstream's `craft-dxf` now (the fork's `crates/dxf` is gone,
+  so mid-parse cancellation no longer applies). Per-file decisions:
+  `docs/upstream-sync.md`.
+
 ## [0.11.0] - 2026-11-07
 
 ### Changed
