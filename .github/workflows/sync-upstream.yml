@@ -93,11 +93,11 @@ jobs:
         run: |
           git push --force-with-lease origin sync/auto-upstream
           BODY=$(printf 'Automated upstream sync hit merge conflicts and stopped for a human.\n\nConflicted files:\n\n```\n%s\n```\n\nResolve them on this branch (fork features win where they conflict with upstream refactors; see docs/upstream-sync.md), then merge this PR. Note: .github/workflows/ was kept at the main branch version in the conflicted commit (the Actions token cannot push workflow changes) — apply upstream workflow changes manually. Nothing was pushed to main.' "$(cat /tmp/conflicts.txt)")
-          if ! gh api --method POST "repos/${{ github.repository }}/pulls" \
-            -f title="上游同步：合并冲突，需人工处理" -f head="sync/auto-upstream" -f base="main" -f body="$BODY" 2>/tmp/prerr.txt; then
-            echo "::error::PRCREATE-FAILED: $(tr '\n' ' ' < /tmp/prerr.txt | cut -c1-800)"
-            gh pr comment sync/auto-upstream --body "$BODY" || true
-          fi
+          # REST, not `gh pr create`: GraphQL createPullRequest is denied for
+          # the Actions token ("Resource not accessible by integration").
+          gh api --method POST "repos/${{ github.repository }}/pulls" \
+            -f title="上游同步：合并冲突，需人工处理" -f head="sync/auto-upstream" -f base="main" -f body="$BODY" \
+            || gh pr comment sync/auto-upstream --body "$BODY" || true
           exit 1
 
       - name: Stop for a human if the merge touches workflow files
@@ -109,9 +109,9 @@ jobs:
           if git diff --name-only origin/main..HEAD -- .github/workflows/ | grep -q .; then
             echo "touched=true" >> "$GITHUB_OUTPUT"
             git push --force-with-lease origin sync/auto-upstream
-            gh pr create --base main --head sync/auto-upstream \
-              --title "上游同步：涉及 workflow 文件，需人工推送" \
-              --body "Automated upstream sync merged cleanly, but the merge changes \`.github/workflows/**\`, which the workflow token is not allowed to push. Review and merge this PR from an account with workflows permission (or push the branch with the fork's PAT tooling), then dispatch the Release workflow manually if a release is wanted." \
+            gh api --method POST "repos/${{ github.repository }}/pulls" \
+              -f title="上游同步：涉及 workflow 文件，需人工推送" -f head="sync/auto-upstream" -f base="main" \
+              -f body="Automated upstream sync merged cleanly, but the merge changes .github/workflows/**, which the workflow token is not allowed to push. Review and merge this PR from an account with workflows permission (or push the branch with the fork PAT tooling), then dispatch the Release workflow manually if a release is wanted." \
               || true
           else
             echo "touched=false" >> "$GITHUB_OUTPUT"
@@ -152,9 +152,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git push --force-with-lease origin sync/auto-upstream
-          gh pr create --base main --head sync/auto-upstream \
-            --title "上游同步：CI 未通过，需人工处理" \
-            --body "Automated upstream sync merged cleanly, but \`cargo xtask ci\` failed on the merged tree (see the workflow run log). Fix on this branch, then merge this PR. Nothing was pushed to main." \
+          gh api --method POST "repos/${{ github.repository }}/pulls" \
+            -f title="上游同步：CI 未通过，需人工处理" -f head="sync/auto-upstream" -f base="main" \
+            -f body="Automated upstream sync merged cleanly, but cargo xtask ci failed on the merged tree (see the workflow run log). Fix on this branch, then merge this PR. Nothing was pushed to main." \
             || gh pr comment sync/auto-upstream --body "cargo xtask ci still failing on the latest automated sync attempt; see the newest Sync upstream run." || true
           exit 1
 
