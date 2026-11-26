@@ -73,7 +73,12 @@ jobs:
             echo "clean=false" >> "$GITHUB_OUTPUT"
             echo "### Merge conflicts" >> "$GITHUB_STEP_SUMMARY"
             cat /tmp/conflicts.txt >> "$GITHUB_STEP_SUMMARY"
-            git merge --abort
+            # Commit the conflicted merge so the staging branch differs from
+            # main and a PR can be opened for manual resolution. (Aborting
+            # would leave the branch identical to main, and `gh pr create`
+            # would fail with "No commits between main and sync/auto-upstream".)
+            git add -A
+            git commit -m "Merge upstream/main (automated sync) — CONFLICTED, resolve manually" || true
           fi
 
       - name: Open a PR for a conflicted merge and stop
