@@ -252,3 +252,12 @@ character, which depends on the ambient fonts having every glyph — CI's
 Linux runners have no Simplified-Chinese face, so one character shapes to
 nothing there. The test now asserts the ink fit (per-glyph and whole-run)
 instead of the group count.
+The next CI run exposed another font-coverage red the EMF failure had been
+masking (fail-fast): three `accessibility_names` tests panicked in epaint —
+"No glyph for 贡 (U+8D21)" — because the fork's basemap attribution
+("© OpenStreetMap 贡献者") renders on the canvas and CI's Linux runners
+have no Simplified-Chinese face in egui's stack (the embedded craft faces
+are Japanese/Korean). epaint's default missing-glyph policy is Panic, so
+this was also a latent crash on any system without a CJK font.
+`theme::install_fonts` now sets `MissingGlyphPolicy::Tofu`, with a unit
+test pinning the policy.

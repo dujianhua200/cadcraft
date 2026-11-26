@@ -407,6 +407,11 @@ pub fn install_fonts(ctx: &egui::Context, language: &str) {
         f.push("Hack".into());
     }
     craft_ui::fonts::load(ctx, fonts);
+    // The fork renders Chinese by default (interface text and the basemap attribution), and the
+    // embedded craft faces are Japanese/Korean: a Simplified-only glyph (e.g. 贡 in
+    // "© OpenStreetMap 贡献者") can be missing on a system with no CJK font of its own. Draw
+    // tofu for such a glyph instead of panicking (epaint's default Panic policy).
+    ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
 }
 
 /// The system interface fonts [`install_fonts`] looks for, in order; it loads the first installed
@@ -975,6 +980,16 @@ mod tests {
 
     fn families<'a>(faces: &[&'a CraftFont]) -> Vec<&'a str> {
         faces.iter().map(|f| f.family).collect()
+    }
+
+    /// Installing the interface fonts leaves a missing glyph drawing tofu, not panicking:
+    /// the fork's Chinese text (e.g. the basemap attribution) can miss glyphs in the embedded
+    /// Japanese/Korean craft faces on a system with no CJK font of its own.
+    #[test]
+    fn install_fonts_draws_tofu_for_a_missing_glyph() {
+        let ctx = egui::Context::default();
+        super::install_fonts(&ctx, "zh");
+        assert_eq!(ctx.missing_glyph_policy(), egui::MissingGlyphPolicy::Tofu);
     }
 
     #[test]
