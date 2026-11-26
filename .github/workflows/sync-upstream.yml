@@ -28,6 +28,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: write # dispatch the Release workflow + watch its run
 
 concurrency:
   group: sync-upstream
