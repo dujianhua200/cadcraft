@@ -25,16 +25,41 @@ pub(super) fn wheel_zoom_points(events: &[egui::Event], opts: &egui::InputOption
     if points.is_finite() { points } else { 0.0 }
 }
 
+<<<<<<< HEAD
 // Fork: upstream's `edit_text_at` was here; the canvas root module carries a
 // superset (locked-layer hint + dimension double-click opens Properties) under
 // the same name, which is the one the canvas calls. Removed as a dead duplicate.
+=======
+/// The model space tiles on screen (none without tiling): each tile's rectangle in `full`.
+/// Start TEXTEDIT on the text, mtext, attribute definition, dimension or multileader text at `p`
+/// (the objects its shortcut menu offers Edit Text for, multileaders, #1081, and dimensions, #842);
+/// false when there is none.
+pub(super) fn edit_text_at(app: &mut CadApp, p: Vec2) -> bool {
+    use cadcraft_engine::doc::EntityKind;
+    let is_text = cadcraft_engine::cmd::curves::pick_at(&app.session, p).and_then(|h| {
+        app.session.doc().ok()?.entity(h).map(|e| match &e.kind {
+            EntityKind::Text(_) | EntityKind::MText(_) | EntityKind::AttDef(_) | EntityKind::Dimension(_) => true,
+            EntityKind::MLeader(m) => m.text.is_some(),
+            _ => false,
+        })
+    });
+    if is_text != Some(true) {
+        return false;
+    }
+    app.start("textedit");
+    if let Err(e) = app.session.input(Input::Point(p)) {
+        app.session.echo(e.to_string());
+    }
+    true
+}
+>>>>>>> upstream/main
 
 /// The hatch under world point `w` within the pick aperture (PICKBOX × 1.5 pixels at `scale`
 /// pixels per unit), if any.
 pub(super) fn hatch_at(app: &CadApp, w: Vec2, scale: f64) -> Option<Handle> {
     let st = app.session.state().ok()?;
     let aperture = app.session.settings.pickbox.max(1.0) * 1.5 / scale.max(1e-12);
-    let h = cadcraft_engine::select::pick(&st.doc, &st.edit_space(), w, aperture)?;
+    let h = cadcraft_engine::select::pick_in(&st.doc, &st.edit_space(), st.viewport_frozen(), w, aperture)?;
     matches!(st.doc.entity(h)?.kind, cadcraft_doc::EntityKind::Hatch(_)).then_some(h)
 }
 
@@ -64,6 +89,7 @@ mod hatch_pick_tests {
         let hx = app.session.execute("hatch", &json!({ "points": [[5, 5]], "pattern": "SOLID" })).unwrap()["handle"].as_str().unwrap().to_string();
         let _ = app.session.zoom_extents();
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx);
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0)));
         let frame = |app: &mut CadApp, events: Vec<egui::Event>, time: f64| {
             app.logic(&ctx);

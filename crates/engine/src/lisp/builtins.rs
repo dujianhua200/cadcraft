@@ -11,7 +11,11 @@ use std::sync::Arc;
 
 use super::eval::{Ctx, Flow, Special};
 use super::value::{Builtin, BuiltinKind, Sym, Value, charge_bytes, check_string_len, eq, equal, real_text, to_text};
+<<<<<<< HEAD
 use super::{Env, LispError, dcl, drawing, input, read};
+=======
+use super::{Env, LispError, drawing, input, objects, read};
+>>>>>>> upstream/main
 
 macro_rules! cxrs {
     ($($name:ident $path:literal),*) => {
@@ -326,6 +330,10 @@ static BUILTINS: &[Builtin] = &[
     ctx!("SSGETFIRST", drawing::ssgetfirst),
     ctx!("TBLSEARCH", drawing::tblsearch),
     ctx!("TBLNEXT", drawing::tblnext),
+    ctx!("TBLOBJNAME", objects::tblobjname),
+    ctx!("NAMEDOBJDICT", objects::namedobjdict),
+    ctx!("DICTSEARCH", objects::dictsearch),
+    ctx!("DICTNEXT", objects::dictnext),
     ctx!("RTOS", drawing::rtos),
     ctx!("ANGTOS", drawing::angtos),
     ctx!("DISTOF", drawing::distof),
