@@ -93,9 +93,11 @@ jobs:
         run: |
           git push --force-with-lease origin sync/auto-upstream
           BODY=$(printf 'Automated upstream sync hit merge conflicts and stopped for a human.\n\nConflicted files:\n\n```\n%s\n```\n\nResolve them on this branch (fork features win where they conflict with upstream refactors; see docs/upstream-sync.md), then merge this PR. Note: .github/workflows/ was kept at the main branch version in the conflicted commit (the Actions token cannot push workflow changes) — apply upstream workflow changes manually. Nothing was pushed to main.' "$(cat /tmp/conflicts.txt)")
-          gh pr create --base main --head sync/auto-upstream \
-            --title "上游同步：合并冲突，需人工处理" --body "$BODY" \
-            || gh pr comment sync/auto-upstream --body "$BODY" || true
+          if ! gh pr create --base main --head sync/auto-upstream \
+            --title "上游同步：合并冲突，需人工处理" --body "$BODY" 2>/tmp/prerr.txt; then
+            echo "::error::PRCREATE-FAILED: $(tr '\n' ' ' < /tmp/prerr.txt | cut -c1-800)"
+            gh pr comment sync/auto-upstream --body "$BODY" || true
+          fi
           exit 1
 
       - name: Stop for a human if the merge touches workflow files
