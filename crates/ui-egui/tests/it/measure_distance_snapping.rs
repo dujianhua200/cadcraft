@@ -47,7 +47,7 @@ fn harness(paper: bool, render: bool) -> Harness<'static, CadApp> {
     // This test locates the toolbar button by its English label; the out-of-box default is Chinese.
     app.ui.interface_language = cadcraft_ui_egui::i18n::Preference::English;
     app.canvas.zoom_pending = false;
-    let builder = Harness::builder().with_size(vec2(1600.0, 1000.0));
+    let builder = Harness::builder().with_context_setup(cadcraft_ui_egui::framework::install_headless).with_size(vec2(1600.0, 1000.0));
     let builder = if render { builder.wgpu() } else { builder };
     let mut h = builder.build_ui_state(
         |ui, app: &mut CadApp| {
