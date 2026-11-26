@@ -2149,7 +2149,17 @@ mod tests {
         let parsed = parse_emf(&emf((0, 0, 400, 100), records));
         assert_eq!(parsed.texts.len(), 1);
         let (_, sh) = &parsed.texts[0];
-        assert_eq!(sh.glyphs.len(), n as usize, "one glyph group per character");
+        // Not "one glyph group per character": a character the resolved face
+        // (and its fallbacks) has no glyph for shapes to nothing and is
+        // dropped, which depends on the fonts installed where the test runs
+        // (CI's Linux runners have no Simplified-Chinese face, so 项 drops
+        // there). What this regression guards is the fit: no glyph's ink may
+        // overflow its 100-unit advance or the 100-unit em, and the whole
+        // run stays inside the 400 units its Dx advances span.
+        assert!(!sh.glyphs.is_empty(), "the text shaped to nothing at all");
+        let ink = Bounds2::from_points(sh.glyphs.iter().flatten().flatten().copied());
+        assert!(ink.min.x >= -2.0 && ink.max.x <= 402.0, "ink {ink:?} escapes the 400 units of Dx advances");
+        assert!(ink.height() <= 102.0, "ink height {} overflows the 100-unit em", ink.height());
         for (i, g) in sh.glyphs.iter().enumerate() {
             let b = Bounds2::from_points(g.iter().flatten().copied());
             assert!(b.width() <= 102.0, "glyph {i} ink width {} overflows its 100-unit advance", b.width());

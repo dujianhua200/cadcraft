@@ -246,3 +246,9 @@ nightly signing architecture (shared release.yml callers), which the fork's
 vendored unsigned release.yml deliberately is not, and the fork ships no
 nightly builds. Three shellcheck findings in `sync-upstream.yml` (SC2129,
 SC2016, SC2034) were fixed so the packaging lint's actionlint passes.
+The same CI run also exposed a pre-existing red (failing identically on
+pre-sync main): the EMF DX regression test asserted one glyph group per
+character, which depends on the ambient fonts having every glyph — CI's
+Linux runners have no Simplified-Chinese face, so one character shapes to
+nothing there. The test now asserts the ink fit (per-glyph and whole-run)
+instead of the group count.
